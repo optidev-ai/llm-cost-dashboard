@@ -215,6 +215,54 @@ export function budgetByTeam(ds: Dataset): TeamBudget[] {
     .sort((a, b) => b.util - a.util);
 }
 
+// ── alerts & anomalies (Audit view) ───────────────────────────────────────────
+export interface BudgetAlert {
+  teamId: string;
+  name: string;
+  util: number;
+  level: "warning" | "critical";
+}
+
+/** Budget-threshold alerts — teams forecast to cross 90% / 100% of budget. */
+export function budgetAlerts(ds: Dataset): BudgetAlert[] {
+  return budgetByTeam(ds)
+    .filter((b) => b.util >= 0.9)
+    .map((b) => ({ teamId: b.teamId, name: b.name, util: b.util, level: b.util >= 1 ? "critical" : "warning" as const }));
+}
+
+export interface Anomaly {
+  teamId: string;
+  name: string;
+  date: string;
+  cost: number;
+  factor: number; // × trailing median
+}
+
+/** Spend-spike detection: a team-day whose cost exceeds `mult`× its trailing-7d median. */
+export function anomalies(ds: Dataset, mult = 3): Anomaly[] {
+  const name = new Map(ds.teams.map((t) => [t.id, t.name]));
+  // daily cost per team
+  const byTeam = new Map<string, Map<string, number>>();
+  ds.usage.forEach((r) => {
+    const m = byTeam.get(r.teamId) ?? new Map<string, number>();
+    m.set(r.date, (m.get(r.date) ?? 0) + r.cost);
+    byTeam.set(r.teamId, m);
+  });
+  const out: Anomaly[] = [];
+  byTeam.forEach((series, teamId) => {
+    const days = [...series.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    for (let i = 7; i < days.length; i++) {
+      const window = days.slice(i - 7, i).map(([, c]) => c).sort((a, b) => a - b);
+      const median = window[Math.floor(window.length / 2)] || 0;
+      const [date, cost] = days[i];
+      if (median > 0 && cost > median * mult) {
+        out.push({ teamId, name: name.get(teamId) ?? teamId, date, cost, factor: cost / median });
+      }
+    }
+  });
+  return out.sort((a, b) => b.factor - a.factor).slice(0, 8);
+}
+
 /** Biggest week-over-week spend movers (last 7 days vs prior 7). */
 export interface Mover {
   teamId: string;

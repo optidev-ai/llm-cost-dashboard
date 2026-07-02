@@ -55,11 +55,11 @@ src/
 ## Roadmap
 
 - [x] Executive / Finance view
-- [ ] Platform view — model mix, latency p50/p95, cache-hit, budget-headroom gauges, policy compliance
-- [ ] Team view — per-team detail, top projects/users
-- [ ] Audit view — request log + filters + export, multi-threshold alerts, anomaly detection
-- [ ] Mode ② — provider Usage/Cost API via edge function
-- [ ] Mode ③ — LiteLLM / Cloudflare AI Gateway ingestion
+- [x] Platform view — model mix, latency p50/p95, cache-hit, budget-headroom gauges, premium-model governance
+- [x] Team view — per-team detail, spend vs budget, model mix, trend
+- [x] Audit view — request log + filters + CSV export, budget alerts, spend-spike anomaly detection
+- [x] Mode ② — provider Usage/Cost API via edge function (`supabase/functions/usage`)
+- [ ] Mode ③ — LiteLLM / Cloudflare AI Gateway ingestion (unlocks latency, errors, true per-team attribution)
 
 ## License
 
