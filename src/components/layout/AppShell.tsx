@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Cpu, ScrollText, Users } from "lucide-react";
+import { ScrollText, Users } from "lucide-react";
 import type { PersonaView } from "@/lib/types";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { ExecutiveView } from "@/views/ExecutiveView";
+import { PlatformView } from "@/views/PlatformView";
 import { ComingSoon } from "@/views/ComingSoon";
 
 export function AppShell() {
@@ -15,17 +16,7 @@ export function AppShell() {
       <main className="bg-grid flex min-w-0 flex-1 flex-col overflow-y-auto">
         <Topbar view={view} />
         {view === "executive" && <ExecutiveView />}
-        {view === "platform" && (
-          <ComingSoon
-            icon={Cpu}
-            title="Platform & Reliability"
-            points={[
-              "Model & provider mix, cost per request, cache-hit rate",
-              "Latency p50/p95 and error rate by provider",
-              "Budget-headroom gauges and allowed-model policy compliance",
-            ]}
-          />
-        )}
+        {view === "platform" && <PlatformView />}
         {view === "team" && (
           <ComingSoon
             icon={Users}
