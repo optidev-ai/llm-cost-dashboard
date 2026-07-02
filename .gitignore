@@ -1,0 +1,108 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+node_modules/.ignored/
+node_modules/.tmp/
+node_modules/.pnpm-workspace-state-v1.json
+node_modules/.modules.yaml
+
+# pnpm store (should not be committed)
+.pnpm-store/
+.pnpm-state.json
+
+# Build outputs
+dist
+dist-ssr
+build
+out
+*.local
+
+# TypeScript
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Testing
+coverage
+*.lcov
+.nyc_output
+test-results
+playwright-report
+playwright/.cache
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude AI
+.claude/
+
+# Build caches
+.cache/
+.turbo/
+.parcel-cache/
+.rollup.cache/
+.vite/
+.vite-cache/
+vite-cache/
+.next/
+.nuxt/
+.eslintcache
+.stylelintcache
+
+# Documentation
+docs/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+tmp/
+temp/
+.serena/
+
+# Package manager files (optional - keep if you want reproducible builds)
+# pnpm-lock.yaml
+# yarn.lock
+# package-lock.json
+
+# Misc
+*.orig
+*.bak
+*.backup
+.history
+.gitattributes
+
+# claude dev artifacts
+.playwright-mcp/
+*.log
