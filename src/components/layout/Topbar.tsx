@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { KeyRound } from "lucide-react";
 import { useDashboard } from "@/lib/datasource";
 import { cn } from "@/lib/utils";
 import type { PersonaView } from "@/lib/types";
+import { ConnectKeyDialog } from "@/components/dashboard/ConnectKeyDialog";
 
 const TITLES: Record<PersonaView, { title: string; sub: string }> = {
   executive: { title: "Executive Overview", sub: "Spend, allocation & budget across the org" },
@@ -11,7 +13,8 @@ const TITLES: Record<PersonaView, { title: string; sub: string }> = {
 };
 
 export function Topbar({ view }: { view: PersonaView }) {
-  const { ranges, range, setRange, dataset, mode } = useDashboard();
+  const { ranges, range, setRange, dataset, mode, connectLive } = useDashboard();
+  const [connectOpen, setConnectOpen] = useState(false);
   const t = TITLES[view];
 
   return (
@@ -54,11 +57,16 @@ export function Topbar({ view }: { view: PersonaView }) {
           ))}
         </div>
 
-        <button className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
+        <button
+          onClick={() => setConnectOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
           <KeyRound className="h-3.5 w-3.5" strokeWidth={2} />
           Connect your key
         </button>
       </div>
+
+      <ConnectKeyDialog open={connectOpen} onOpenChange={setConnectOpen} onConnected={(ds) => connectLive(ds, "key")} />
     </header>
   );
 }

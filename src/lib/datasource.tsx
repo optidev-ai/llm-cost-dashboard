@@ -30,18 +30,34 @@ interface DashboardCtx {
   ranges: DateRange[];
   range: DateRange;
   setRange: (r: DateRange) => void;
+  /** Swap the demo dataset for live data (Mode ②/③). */
+  connectLive: (ds: Dataset, mode?: DataMode) => void;
 }
 
 const Ctx = createContext<DashboardCtx | null>(null);
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
-  const dataset = useMemo(() => getDemoDataset(), []);
+  const demo = useMemo(() => getDemoDataset(), []);
+  const [dataset, setDataset] = useState<Dataset>(demo);
+  const [mode, setMode] = useState<DataMode>("demo");
+  const [rangeLabel, setRangeLabel] = useState("30D"); // default 30D
+
   const ranges = useMemo(() => buildRanges(dataset), [dataset]);
-  const [range, setRange] = useState<DateRange>(ranges[1]); // default 30D
+  const range = ranges.find((r) => r.label === rangeLabel) ?? ranges[1];
 
   const value = useMemo<DashboardCtx>(
-    () => ({ dataset, mode: "demo", ranges, range, setRange }),
-    [dataset, ranges, range],
+    () => ({
+      dataset,
+      mode,
+      ranges,
+      range,
+      setRange: (r: DateRange) => setRangeLabel(r.label),
+      connectLive: (ds: Dataset, m: DataMode = "key") => {
+        setDataset(ds);
+        setMode(m);
+      },
+    }),
+    [dataset, mode, ranges, range],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
