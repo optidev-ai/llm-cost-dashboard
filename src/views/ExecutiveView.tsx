@@ -4,6 +4,7 @@ import { useDashboard } from "@/lib/datasource";
 import {
   budgetByTeam,
   dailyByDept,
+  departments,
   kpis,
   monthFinance,
   rowsInRange,
@@ -13,7 +14,7 @@ import {
   topMovers,
 } from "@/lib/analytics";
 import type { DateRange } from "@/lib/types";
-import { DEPARTMENTS, deptColor, modelColor, providerColor } from "@/lib/palette";
+import { OTHER_COLOR, SERIES, modelColor, providerColor } from "@/lib/palette";
 import { fmtCurrency, fmtCurrencyFull, fmtPct } from "@/lib/format";
 import { CapsLabel, DeltaBadge, SectionCard, StatTile } from "@/components/dashboard/primitives";
 import { MixDonut, RankedBars, SpendAreaChart } from "@/components/dashboard/charts";
@@ -30,12 +31,12 @@ function shiftRange(range: DateRange): DateRange {
   return { from: pFrom.toISOString().slice(0, 10), to: pTo.toISOString().slice(0, 10), label: "prev" };
 }
 
-function DeptLegend() {
+function DeptLegend({ depts, colorFor }: { depts: string[]; colorFor: (d: string) => string }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-      {DEPARTMENTS.map((d) => (
+      {depts.map((d) => (
         <span key={d} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="h-2 w-2 rounded-[2px]" style={{ backgroundColor: deptColor(d) }} />
+          <span className="h-2 w-2 rounded-[2px]" style={{ backgroundColor: colorFor(d) }} />
           {d}
         </span>
       ))}
@@ -88,7 +89,12 @@ export function ExecutiveView() {
   const k = useMemo(() => kpis(rows), [rows]);
   const prevSpend = useMemo(() => prevRows.reduce((s, r) => s + r.cost, 0), [prevRows]);
   const mf = useMemo(() => monthFinance(dataset), [dataset]);
-  const dailyDept = useMemo(() => dailyByDept(dataset, rows), [dataset, rows]);
+  const depts = useMemo(() => departments(dataset, rows), [dataset, rows]);
+  const colorForDept = useMemo(() => {
+    const idx = new Map(depts.map((d, i) => [d, i]));
+    return (d: string) => SERIES[idx.get(d) ?? -1] ?? OTHER_COLOR;
+  }, [depts]);
+  const dailyDept = useMemo(() => dailyByDept(dataset, rows, depts), [dataset, rows, depts]);
   const models = useMemo(() => spendByModel(dataset, rows), [dataset, rows]);
   const providers = useMemo(() => spendByProvider(dataset, rows), [dataset, rows]);
   const budgets = useMemo(() => budgetByTeam(dataset), [dataset]);
@@ -149,9 +155,9 @@ export function ExecutiveView() {
           className="lg:col-span-2"
           title="Spend over time"
           subtitle="Daily cost, stacked by department"
-          action={<DeptLegend />}
+          action={<DeptLegend depts={depts} colorFor={colorForDept} />}
         >
-          <SpendAreaChart data={dailyDept} keys={DEPARTMENTS} colorFor={deptColor} />
+          <SpendAreaChart data={dailyDept} keys={depts} colorFor={colorForDept} />
         </SectionCard>
         <SectionCard title="Spend by model" subtitle={`${range.label} · ${dataset.models.length} models`}>
           <MixDonut data={models} colorFor={(key) => modelColor(key, dataset.models)} centerLabel="Total" centerValue={fmtCurrency(k.spend)} />

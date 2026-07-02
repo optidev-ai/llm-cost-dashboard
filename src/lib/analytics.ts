@@ -3,7 +3,6 @@
  * share identical downstream math — only the row source differs.
  */
 import type { Dataset, DateRange, UsageRow } from "./types";
-import { DEPARTMENTS } from "./palette";
 
 export function rowsInRange(ds: Dataset, range: DateRange): UsageRow[] {
   return ds.usage.filter((r) => r.date >= range.from && r.date <= range.to);
@@ -104,13 +103,27 @@ export function dailySpend(rows: UsageRow[]): { date: string; cost: number }[] {
   return [...m.entries()].map(([date, cost]) => ({ date, cost })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/** Ordered department list for a dataset (by spend, capped; overflow → "Other"). */
+export function departments(ds: Dataset, rows: UsageRow[], cap = 6): string[] {
+  const ranked = spendByDept(ds, rows).map((d) => d.name);
+  if (ranked.length <= cap) return ranked;
+  return [...ranked.slice(0, cap), "Other"];
+}
+
 /** Daily spend split into one column per department (stacked-area friendly). */
-export function dailyByDept(ds: Dataset, rows: UsageRow[]): Record<string, number | string>[] {
+export function dailyByDept(
+  ds: Dataset,
+  rows: UsageRow[],
+  depts: string[],
+): Record<string, number | string>[] {
+  const inSet = new Set(depts);
+  const hasOther = inSet.has("Other");
   const dept = new Map(ds.teams.map((t) => [t.id, t.department]));
   const byDate = new Map<string, Record<string, number>>();
   rows.forEach((r) => {
     const d = byDate.get(r.date) ?? {};
-    const k = dept.get(r.teamId) ?? "Other";
+    let k = dept.get(r.teamId) ?? "Other";
+    if (!inSet.has(k)) k = hasOther ? "Other" : k;
     d[k] = (d[k] ?? 0) + r.cost;
     byDate.set(r.date, d);
   });
@@ -118,7 +131,7 @@ export function dailyByDept(ds: Dataset, rows: UsageRow[]): Record<string, numbe
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, d]) => {
       const row: Record<string, number | string> = { date };
-      DEPARTMENTS.forEach((dep) => (row[dep] = d[dep] ?? 0));
+      depts.forEach((dep) => (row[dep] = d[dep] ?? 0));
       return row;
     });
 }
