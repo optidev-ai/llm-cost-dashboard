@@ -100,7 +100,7 @@ async function fetchOpenAI(adminKey: string, days: number): Promise<RawRow[]> {
   const rows: RawRow[] = [];
   let page: string | undefined;
   for (let guard = 0; guard < 8; guard++) {
-    const qs = new URLSearchParams({ start_time: String(startTime), bucket_width: "1d", limit: "180" });
+    const qs = new URLSearchParams({ start_time: String(startTime), bucket_width: "1d", limit: "31" });
     qs.append("group_by[]", "model");
     qs.append("group_by[]", "project_id");
     if (page) qs.set("page", page);
