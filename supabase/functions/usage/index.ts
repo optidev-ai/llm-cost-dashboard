@@ -57,7 +57,7 @@ async function fetchAnthropic(adminKey: string, days: number): Promise<RawRow[]>
   const start = new Date(end.getTime() - days * DAY);
   const rows: RawRow[] = [];
   let page: string | undefined;
-  for (let guard = 0; guard < 15; guard++) {
+  for (let guard = 0; guard < 20; guard++) {
     const qs = new URLSearchParams({ starting_at: start.toISOString(), ending_at: end.toISOString(), bucket_width: "1d", limit: "31" });
     qs.append("group_by[]", "model");
     qs.append("group_by[]", "workspace_id");
@@ -97,7 +97,7 @@ async function fetchOpenAI(adminKey: string, days: number): Promise<RawRow[]> {
   const startTime = Math.floor((Date.now() - days * DAY) / 1000);
   const rows: RawRow[] = [];
   let page: string | undefined;
-  for (let guard = 0; guard < 15; guard++) {
+  for (let guard = 0; guard < 20; guard++) {
     const qs = new URLSearchParams({ start_time: String(startTime), bucket_width: "1d", limit: "31" });
     qs.append("group_by[]", "model");
     qs.append("group_by[]", "project_id");
@@ -259,9 +259,21 @@ Deno.serve(async (req: Request) => {
     }
     if (!cred) return json({ needsKey: true }, 200);
 
-    const rows = cred.provider === "anthropic" ? await fetchAnthropic(cred.adminKey, days) : await fetchOpenAI(cred.adminKey, days);
-    if (rows.length === 0) return json({ error: "No usage found for this org/time range" }, 404);
-    return json(buildDataset(cred.provider, rows, days), 200);
+    const fetcher = cred.provider === "anthropic" ? fetchAnthropic : fetchOpenAI;
+    let effectiveDays = days;
+    let rows = await fetcher(cred.adminKey, effectiveDays);
+    // Sparse orgs (test / low-usage) can have no activity in the requested window
+    // but real spend further back. Auto-widen once to ~13 months before giving up,
+    // so the dashboard shows real data whenever any exists. Active orgs hit the
+    // first pass and never pay for the wider scan.
+    if (rows.length === 0 && effectiveDays < 400) {
+      effectiveDays = 400;
+      rows = await fetcher(cred.adminKey, effectiveDays);
+    }
+    if (rows.length === 0) {
+      return json({ error: "No usage found for this org in the last 13 months. The key is valid, but the org has no recorded activity in that window — check the provider's own usage dashboard." }, 404);
+    }
+    return json(buildDataset(cred.provider, rows, effectiveDays), 200);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     return json({ error: msg }, msg === "cloud_not_active" ? 409 : 502);
