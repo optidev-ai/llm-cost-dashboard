@@ -4,14 +4,25 @@
 
 Holds a provider **admin key** server-side and calls the provider Usage API
 (browsers can't — CORS + key exposure), returning the app's `Dataset` shape.
+One endpoint, two actions:
 
-`POST /usage` body: `{ "provider": "anthropic" | "openai", "adminKey"?: string, "days"?: number }`
+- **`POST /usage` `{ "action": "connect", "provider": "anthropic"|"openai", "adminKey": "…" }`**
+  — encrypts the key (AES-GCM) and stores it in the project's Cloud DB
+  (`app_usage_credential`). Runs **once**; the key never persists in the browser.
+- **`POST /usage` `{ "action": "fetch", "days"?: number }`** — reads the stored key,
+  calls the provider Usage/Cost API, returns the `Dataset`. Returns `{ needsKey: true }`
+  if no key is stored yet, so the app can prompt Connect.
 
-The admin key can come from the request body (what the Connect dialog sends) **or**
-from a secret env var — the more secure setup, where the key never touches the browser:
+Key resolution order for `fetch`: **stored credential** → request-body `adminKey` →
+`ANTHROPIC_ADMIN_KEY` / `OPENAI_ADMIN_KEY` env secret. So you can either connect once
+via the app, or set a secret (never-touches-browser) — either works:
 
 - `ANTHROPIC_ADMIN_KEY` (`sk-ant-admin…`, Team/Enterprise org)
 - `OPENAI_ADMIN_KEY` (`sk-…` admin key)
+
+**Requires the `app_usage_credential` table** (`supabase/migrations/…_usage_credential.sql`) —
+RLS on with no policies, so only the service-role function can read the encrypted key.
+The table + Cloud are provisioned by remix (`autoActivateSupabase` + schema apply).
 
 ### Deploy (OptiDev Cloud / Supabase)
 

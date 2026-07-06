@@ -62,34 +62,49 @@ export class ProxyNotConfiguredError extends Error {
   }
 }
 
+/** Thrown when the backend is reachable but no admin key has been connected yet. */
+export class NoKeyError extends Error {
+  constructor() {
+    super("No admin key connected");
+    this.name = "NoKeyError";
+  }
+}
+
 /** The edge-function/proxy base URL, injected at build or runtime (window.__ENV__). */
 export function getProxyUrl(): string | undefined {
   return getEnv("VITE_USAGE_PROXY_URL");
 }
 
-export interface LiveConfig {
-  provider: ProviderId;
-  adminKey: string;
-  days?: number;
-}
-
-/**
- * Fetch the org's real usage via the proxy and return a `Dataset`. The proxy is
- * responsible for calling the provider Usage/Cost API (admin key stays server-side)
- * and normalizing into our `Dataset` shape, so every view works unchanged.
- */
-export async function fetchLiveUsage({ provider, adminKey, days = 90 }: LiveConfig): Promise<Dataset> {
+async function callProxy(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
   const base = getProxyUrl();
   if (!base) throw new ProxyNotConfiguredError();
-
   const res = await fetch(`${base.replace(/\/$/, "")}/usage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ provider, adminKey, days }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Proxy error ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
   }
-  return (await res.json()) as Dataset;
+  return (await res.json()) as Record<string, unknown>;
+}
+
+/**
+ * Save the admin key once — the function encrypts and stores it server-side, so
+ * it never persists in the browser and subsequent loads work without re-entry.
+ */
+export async function connectKey(provider: ProviderId, adminKey: string): Promise<void> {
+  const out = await callProxy({ action: "connect", provider, adminKey });
+  if (!out.ok) throw new Error(typeof out.error === "string" ? out.error : "Failed to store key");
+}
+
+/**
+ * Fetch the org's real usage via the proxy (using the stored key) and return a
+ * `Dataset`. Throws NoKeyError if the backend is up but no key is connected yet.
+ */
+export async function fetchLiveUsage({ days = 90 }: { days?: number } = {}): Promise<Dataset> {
+  const out = await callProxy({ action: "fetch", days });
+  if (out.needsKey) throw new NoKeyError();
+  return out as unknown as Dataset;
 }

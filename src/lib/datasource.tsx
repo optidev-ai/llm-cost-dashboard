@@ -4,8 +4,9 @@
  * export) will implement the same `Dataset` contract, so nothing downstream
  * changes when we add them.
  */
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getDemoDataset } from "@/data/seed";
+import { fetchLiveUsage, getProxyUrl } from "./live-source";
 import type { Dataset, DataMode, DateRange } from "./types";
 
 function shift(iso: string, days: number): string {
@@ -44,6 +45,27 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const ranges = useMemo(() => buildRanges(dataset), [dataset]);
   const range = ranges.find((r) => r.label === rangeLabel) ?? ranges[1];
+
+  // Auto-load: if a backend proxy is wired (remixed on OptiDev / self-hosted) and
+  // an admin key was connected earlier, pull real data on open — no dialog needed.
+  // Any failure (no key yet, no proxy, provider error) silently stays on demo.
+  useEffect(() => {
+    if (!getProxyUrl()) return;
+    let cancelled = false;
+    fetchLiveUsage({ days: 90 })
+      .then((ds) => {
+        if (!cancelled) {
+          setDataset(ds);
+          setMode("key");
+        }
+      })
+      .catch(() => {
+        /* NoKeyError / not configured / provider error → stay on demo data */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const value = useMemo<DashboardCtx>(
     () => ({

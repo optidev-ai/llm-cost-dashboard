@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowUpRight, KeyRound, Loader2, Lock, ShieldCheck } from "lucide-react";
+import { KeyRound, Loader2, Lock, ShieldCheck } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,7 @@ import type { Dataset, ProviderId } from "@/lib/types";
 import {
   CONNECTABLE_PROVIDERS,
   ProxyNotConfiguredError,
+  connectKey,
   fetchLiveUsage,
 } from "@/lib/live-source";
 
@@ -44,7 +45,8 @@ export function ConnectKeyDialog({
   async function handleConnect() {
     setPhase("submitting");
     try {
-      const ds = await fetchLiveUsage({ provider, adminKey: key.trim(), days: 90 });
+      await connectKey(provider, key.trim()); // persist server-side, once
+      const ds = await fetchLiveUsage({ days: 90 }); // now uses the stored key
       onConnected?.(ds);
       onOpenChange(false);
       reset();
@@ -154,26 +156,25 @@ export function ConnectKeyDialog({
         {phase === "needs-backend" && (
           <div className="space-y-4">
             <div className="rounded-lg border border-primary/25 bg-gradient-to-br from-primary/10 to-transparent p-4">
-              <p className="text-sm font-medium text-foreground">This demo has no backend wired up.</p>
+              <p className="text-sm font-medium text-foreground">Real data isn't wired up yet</p>
               <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                Reading real usage needs an edge function to hold your admin key and call the provider API
-                (browsers can't — CORS + key exposure). The fastest way to get one: fork this on OptiDev and
-                ask it to wire the proxy for you.
+                Reading your org's usage needs the{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-foreground">usage</code> function deployed — it holds
+                your admin key server-side and calls the provider API (a browser can't: CORS + key exposure). Set it up one of two ways:
               </p>
             </div>
-            <a
-              href="https://app.optidev.ai"
-              target="_blank"
-              rel="noreferrer"
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-            >
-              Build your own on OptiDev
-              <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
-            </a>
-            <p className="text-center text-xs text-muted-foreground">
-              Self-hosting? Set <code className="rounded bg-secondary px-1 py-0.5 text-foreground">VITE_USAGE_PROXY_URL</code>{" "}
-              to your function and reconnect.
-            </p>
+            <div className="space-y-2.5 text-xs leading-relaxed text-muted-foreground">
+              <div className="rounded-lg border border-border bg-secondary/40 p-3">
+                <p className="mb-1 font-medium text-foreground">On OptiDev</p>
+                Ask the agent to <span className="text-foreground">activate OptiDev Cloud and deploy the usage function</span>,
+                then reopen this dialog and connect your key.
+              </div>
+              <div className="rounded-lg border border-border bg-secondary/40 p-3">
+                <p className="mb-1 font-medium text-foreground">Self-hosted</p>
+                Deploy <code className="rounded bg-secondary px-1 py-0.5 text-foreground">supabase/functions/usage</code> and set{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-foreground">VITE_USAGE_PROXY_URL</code> to its URL, then reconnect.
+              </div>
+            </div>
             <div className="flex justify-end">
               <Button variant="ghost" onClick={reset}>
                 Back
