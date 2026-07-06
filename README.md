@@ -6,7 +6,11 @@
 
 Observability tools (Langfuse, Helicone) give you traces. Gateways (LiteLLM, Cloudflare AI Gateway) give you raw analytics. **LLM Ledger gives you the FinOps layer on top** — cost allocation, budget-vs-actual, forecasting, and chargeback — the views a CFO, a platform lead, and a team lead each actually need.
 
-> 🚀 **[Build your own on OptiDev →](https://app.optidev.ai)** — fork this dashboard and customize it by chatting: add Slack budget alerts, a board-report export, your own metrics. No setup.
+<!-- MAINTAINER: swap REMIX_APP_ID for the App Library id (from POST /editor/apps/project/:id/submit).
+     Until then the link falls back gracefully to the OptiDev apps gallery — not a dead link. -->
+[![Try in OptiDev — no setup](https://img.shields.io/badge/%F0%9F%9A%80_Try_in_OptiDev-no_setup-f2b134?style=for-the-badge)](https://app.optidev.ai/dashboard/apps?remix=REMIX_APP_ID)
+
+> **[🚀 Try it in OptiDev →](https://app.optidev.ai/dashboard/apps?remix=REMIX_APP_ID)** — opens this exact dashboard in [OptiDev](https://app.optidev.ai), pre-built and running on demo data. Then make it yours by chatting — add Slack budget alerts, a board-report export, your own metrics — and connect your provider admin key for live spend. No local setup.
 
 ## Highlights
 
