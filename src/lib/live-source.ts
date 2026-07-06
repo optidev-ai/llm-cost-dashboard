@@ -70,17 +70,34 @@ export class NoKeyError extends Error {
   }
 }
 
-/** The edge-function/proxy base URL, injected at build or runtime (window.__ENV__). */
+/**
+ * Base URL of the edge functions. Prefers an explicit VITE_USAGE_PROXY_URL, but
+ * otherwise DERIVES it from VITE_SUPABASE_URL — which OptiDev auto-injects into
+ * .env.local (and window.__ENV__) the moment OptiDev Cloud is activated. So once
+ * Cloud is on and the `usage` function is deployed (both automatic on remix),
+ * the app finds the function with zero manual configuration.
+ */
 export function getProxyUrl(): string | undefined {
-  return getEnv("VITE_USAGE_PROXY_URL");
+  const explicit = getEnv("VITE_USAGE_PROXY_URL");
+  if (explicit) return explicit.replace(/\/$/, "");
+  const supabaseUrl = getEnv("VITE_SUPABASE_URL");
+  if (supabaseUrl) return `${supabaseUrl.replace(/\/$/, "")}/functions/v1`;
+  return undefined;
 }
 
 async function callProxy(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
   const base = getProxyUrl();
   if (!base) throw new ProxyNotConfiguredError();
-  const res = await fetch(`${base.replace(/\/$/, "")}/usage`, {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  // Supabase Edge Functions expect the project's publishable/anon key to invoke.
+  const key = getEnv("VITE_SUPABASE_PUBLISHABLE_KEY") ?? getEnv("VITE_SUPABASE_ANON_KEY");
+  if (key) {
+    headers["authorization"] = `Bearer ${key}`;
+    headers["apikey"] = key;
+  }
+  const res = await fetch(`${base}/usage`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
