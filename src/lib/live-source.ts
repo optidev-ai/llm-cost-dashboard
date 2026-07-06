@@ -18,6 +18,7 @@
  * chargeback needs a gateway (Mode ③). That's the market gap we lean into.
  */
 import { getEnv } from "./env";
+import { signedFetch } from "./gateway-fetch";
 import type { Dataset, ProviderId } from "./types";
 
 export interface ProviderMeta {
@@ -95,11 +96,11 @@ async function callProxy(payload: Record<string, unknown>): Promise<Record<strin
     headers["authorization"] = `Bearer ${key}`;
     headers["apikey"] = key;
   }
-  const res = await fetch(`${base}/usage`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
+  // signedFetch HMAC-signs through the OptiDev gateway (adds x-session-id/x-ts/x-sig
+  // on top of these headers); plain fetch for non-gateway URLs. Body is a fixed
+  // string so the signed hash matches exactly what's sent.
+  const body = JSON.stringify(payload);
+  const res = await signedFetch(`${base}/usage`, { method: "POST", headers, body });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Proxy error ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);

@@ -2,33 +2,31 @@
 //
 // One endpoint, two actions (POST body { action }):
 //   • "connect" { provider, adminKey } → encrypts the admin key and stores it in
-//     the project's Cloud DB (app_usage_credential). Runs ONCE; the key never
-//     lives in the browser after this.
+//     the project's Cloud DB (self-provisions the app_usage_credential table).
+//     Runs ONCE; the key never lives in the browser after this.
 //   • "fetch"   { days? }              → reads the stored key, calls the provider
-//     Usage/Cost API, returns the app's Dataset. If no key is stored yet, returns
-//     { needsKey: true } so the app can prompt Connect. Falls back to a body key
-//     or ANTHROPIC_ADMIN_KEY / OPENAI_ADMIN_KEY env secret.
+//     Usage/Cost API, returns the app's Dataset. Returns { needsKey: true } if no
+//     key is stored. Falls back to a body key or ANTHROPIC_ADMIN_KEY /
+//     OPENAI_ADMIN_KEY env secret.
 //
-// Cloud is a prerequisite: this function runs on OptiDev Cloud and the key table
-// lives there — remix (autoActivateSupabase) provisions both before the user
-// ever connects. What the billing API can't give (latency, errors, request
-// counts) needs a gateway — that's Mode ③.
+// Called through the OptiDev HMAC gateway (the web app signs each request); CORS
+// therefore allows the gateway headers. What the billing API can't give
+// (latency, errors, request counts) needs a gateway integration — that's Mode ③.
 //
-// Endpoints (verified 2026-07): Anthropic /v1/organizations/usage_report/messages
+// Endpoints (verified live 2026-07): Anthropic /v1/organizations/usage_report/messages
 // + /cost_report (x-api-key sk-ant-admin); OpenAI /v1/organization/usage/completions
-// + /costs (Bearer admin). Cost = tokens × price (cached/batch adjusted).
+// + /costs (Bearer admin; daily buckets cap at limit=31 → paginate). Cost =
+// tokens × price (cached/batch adjusted).
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import postgres from "npm:postgres@3";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, content-type, apikey, x-client-info, x-session-id, x-ts, x-sig",
 };
 
 const DAY = 86_400_000;
-const TABLE = "app_usage_credential";
-
 type Provider = "anthropic" | "openai";
 
 // ── price table: USD per 1M tokens (illustrative; edit to negotiated rates) ────
@@ -59,7 +57,7 @@ async function fetchAnthropic(adminKey: string, days: number): Promise<RawRow[]>
   const start = new Date(end.getTime() - days * DAY);
   const rows: RawRow[] = [];
   let page: string | undefined;
-  for (let guard = 0; guard < 8; guard++) {
+  for (let guard = 0; guard < 15; guard++) {
     const qs = new URLSearchParams({ starting_at: start.toISOString(), ending_at: end.toISOString(), bucket_width: "1d", limit: "31" });
     qs.append("group_by[]", "model");
     qs.append("group_by[]", "workspace_id");
@@ -99,7 +97,7 @@ async function fetchOpenAI(adminKey: string, days: number): Promise<RawRow[]> {
   const startTime = Math.floor((Date.now() - days * DAY) / 1000);
   const rows: RawRow[] = [];
   let page: string | undefined;
-  for (let guard = 0; guard < 8; guard++) {
+  for (let guard = 0; guard < 15; guard++) {
     const qs = new URLSearchParams({ start_time: String(startTime), bucket_width: "1d", limit: "31" });
     qs.append("group_by[]", "model");
     qs.append("group_by[]", "project_id");
@@ -165,15 +163,12 @@ function buildDataset(provider: Provider, rows: RawRow[], days: number) {
   };
 }
 
-// ── encrypted credential storage (in the project's Cloud DB) ───────────────────
+// ── encrypted credential storage (self-provisioning table in the project's DB) ──
 const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
 const ub64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 async function aesKey(): Promise<CryptoKey> {
-  // Derive from the service-role key (always present in the function env) so no
-  // extra secret is required; the credential is defense-in-depth on top of the
-  // private, service-role-only table.
-  const secret = Deno.env.get("USAGE_ENCRYPTION_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "insecure-dev-key";
+  const secret = Deno.env.get("USAGE_ENCRYPTION_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_DB_URL") ?? "insecure-dev-key";
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
   return crypto.subtle.importKey("raw", hash, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 }
@@ -187,25 +182,51 @@ async function decrypt(ct: string, iv: string): Promise<string> {
   return new TextDecoder().decode(buf);
 }
 
-function supa() {
-  const url = Deno.env.get("SUPABASE_URL");
-  const svc = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  return url && svc ? createClient(url, svc) : null;
+// Deno edge functions get SUPABASE_DB_URL (direct Postgres). Use the transaction
+// pooler with prepare:false; one short-lived connection per invocation.
+function dbUrl(): string | undefined {
+  return Deno.env.get("SUPABASE_DB_URL");
 }
 
 async function saveCredential(provider: Provider, adminKey: string): Promise<void> {
-  const db = supa();
-  if (!db) throw new Error("cloud_not_active");
+  const url = dbUrl();
+  if (!url) throw new Error("cloud_not_active");
   const { ct, iv } = await encrypt(adminKey);
-  const { error } = await db.from(TABLE).upsert({ id: "default", provider, key_encrypted: ct, key_iv: iv, updated_at: new Date().toISOString() });
-  if (error) throw new Error(`store failed: ${error.message}`);
+  const sql = postgres(url, { prepare: false });
+  try {
+    await sql`create table if not exists app_usage_credential (
+      id text primary key default 'default',
+      provider text not null,
+      key_encrypted text not null,
+      key_iv text not null,
+      updated_at timestamptz not null default now()
+    )`;
+    await sql`insert into app_usage_credential (id, provider, key_encrypted, key_iv, updated_at)
+      values ('default', ${provider}, ${ct}, ${iv}, now())
+      on conflict (id) do update set
+        provider = excluded.provider,
+        key_encrypted = excluded.key_encrypted,
+        key_iv = excluded.key_iv,
+        updated_at = now()`;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }
+
 async function loadCredential(): Promise<{ provider: Provider; adminKey: string } | null> {
-  const db = supa();
-  if (!db) return null;
-  const { data, error } = await db.from(TABLE).select("provider,key_encrypted,key_iv").eq("id", "default").maybeSingle();
-  if (error || !data) return null;
-  return { provider: data.provider as Provider, adminKey: await decrypt(data.key_encrypted, data.key_iv) };
+  const url = dbUrl();
+  if (!url) return null;
+  const sql = postgres(url, { prepare: false });
+  try {
+    const rows = await sql`select provider, key_encrypted, key_iv from app_usage_credential where id = 'default' limit 1`;
+    if (!rows.length) return null;
+    return { provider: rows[0].provider as Provider, adminKey: await decrypt(rows[0].key_encrypted, rows[0].key_iv) };
+  } catch {
+    // table not created yet (no connect has happened) → treat as no key
+    return null;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }
 
 function json(data: unknown, status: number): Response {
@@ -228,7 +249,6 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, provider }, 200);
     }
 
-    // fetch: stored credential → body key → env secret
     const days = Math.min(Math.max(Number(body.days) || 90, 1), 180);
     let cred = await loadCredential();
     if (!cred) {
