@@ -113,7 +113,7 @@ export function ProviderManager({ open, onOpenChange }: { open: boolean; onOpenC
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold text-foreground">{p.name}</div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {isConnected ? "Reading your org Usage & Cost API" : p.note}
+                        {isConnected ? "Reading your org Usage & Cost API" : "Admin key · Usage & Cost API"}
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
