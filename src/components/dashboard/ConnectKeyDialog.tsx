@@ -35,7 +35,9 @@ export function ConnectKeyDialog({
     setPhase("submitting");
     try {
       await connectKey(provider, key.trim()); // persist server-side, once
-      const ds = await fetchLiveUsage({ days: 90 }); // now uses the stored key
+      // Quick 30-day window for a fast first paint; the provider backfills the
+      // full 90-day history in the background (see connectLive).
+      const ds = await fetchLiveUsage({ days: 30 });
       onConnected?.(ds);
       onOpenChange(false);
       reset();

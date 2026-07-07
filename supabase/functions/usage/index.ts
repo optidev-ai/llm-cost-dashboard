@@ -51,85 +51,141 @@ interface RawRow {
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
-// ── provider fetchers ──────────────────────────────────────────────────────────
-async function fetchAnthropic(adminKey: string, days: number): Promise<RawRow[]> {
-  const end = new Date();
-  const start = new Date(end.getTime() - days * DAY);
-  const rows: RawRow[] = [];
-  let page: string | undefined;
-  for (let guard = 0; guard < 20; guard++) {
-    const qs = new URLSearchParams({ starting_at: start.toISOString(), ending_at: end.toISOString(), bucket_width: "1d", limit: "31" });
-    qs.append("group_by[]", "model");
-    qs.append("group_by[]", "workspace_id");
-    if (page) qs.set("page", page);
-    const res = await fetch(`https://api.anthropic.com/v1/organizations/usage_report/messages?${qs}`, {
-      headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
-    });
-    if (!res.ok) throw new Error(`Anthropic usage API ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const json = await res.json();
-    for (const bucket of json.data ?? []) {
-      const date = String(bucket.starting_at ?? bucket.start_time ?? "").slice(0, 10);
-      for (const r of bucket.results ?? []) {
-        const model = r.model ?? "unknown";
-        const uncached = r.uncached_input_tokens ?? 0;
-        const cacheRead = r.cache_read_input_tokens ?? 0;
-        const cacheCreate = r.cache_creation_input_tokens ?? 0;
-        const output = r.output_tokens ?? 0;
-        if (uncached + cacheRead + cacheCreate + output === 0) continue;
-        const p = priceFor("anthropic", model);
-        const batch = r.service_tier === "batch" ? 0.5 : 1;
-        const cost = ((uncached * p.in + cacheRead * p.in * 0.1 + cacheCreate * p.in * 1.25 + output * p.out) / 1e6) * batch;
-        const wsId = r.workspace_id ?? "default";
-        rows.push({
-          date, teamId: wsId, teamName: r.workspace_id ? `Workspace ${String(wsId).slice(-6)}` : "Default workspace",
-          modelId: model, inputTokens: uncached + cacheRead + cacheCreate, outputTokens: output,
-          cachedTokens: cacheRead, requests: 0, errors: 0, cost,
-        });
-      }
+// ── parallel time-chunking ──────────────────────────────────────────────────────
+// Provider org APIs are slow per request and cap at 31 daily buckets per page.
+// Crawling next_page sequentially means N slow round-trips (and the 13-month
+// auto-widen below becomes ~13 of them → minutes). Instead we split the window
+// into contiguous ≤30-day sub-ranges and fetch them CONCURRENTLY (capped), so the
+// whole pull collapses to roughly one request's latency. Ranges tile with an
+// exclusive upper bound (both APIs document ending_at/end_time as exclusive), so
+// no day is double-counted; usage rows are additionally deduped by
+// (date, team, model) — a tuple the APIs already aggregate to — as insurance.
+const CHUNK_DAYS = 30;
+const FETCH_CONCURRENCY = 5;
+
+interface TimeWindow {
+  start: Date;
+  end: Date;
+}
+
+function timeWindows(days: number, chunkDays = CHUNK_DAYS): TimeWindow[] {
+  const windows: TimeWindow[] = [];
+  let cursorMs = Date.now();
+  let remaining = days;
+  while (remaining > 0) {
+    const span = Math.min(chunkDays, remaining);
+    const startMs = cursorMs - span * DAY;
+    windows.push({ start: new Date(startMs), end: new Date(cursorMs) });
+    cursorMs = startMs;
+    remaining -= span;
+  }
+  return windows;
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
     }
-    if (!json.has_more || !json.next_page) break;
-    page = json.next_page;
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+function dedupeRows(rows: RawRow[]): RawRow[] {
+  const seen = new Set<string>();
+  const out: RawRow[] = [];
+  for (const r of rows) {
+    const k = `${r.date}|${r.teamId}|${r.modelId}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
+}
+
+// ── provider fetchers (usage) ────────────────────────────────────────────────────
+async function fetchAnthropicWindow(adminKey: string, w: TimeWindow): Promise<RawRow[]> {
+  const qs = new URLSearchParams({ starting_at: w.start.toISOString(), ending_at: w.end.toISOString(), bucket_width: "1d", limit: "31" });
+  qs.append("group_by[]", "model");
+  qs.append("group_by[]", "workspace_id");
+  const res = await fetch(`https://api.anthropic.com/v1/organizations/usage_report/messages?${qs}`, {
+    headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
+  });
+  if (!res.ok) throw new Error(`Anthropic usage API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const json = await res.json();
+  const rows: RawRow[] = [];
+  for (const bucket of json.data ?? []) {
+    const date = String(bucket.starting_at ?? bucket.start_time ?? "").slice(0, 10);
+    for (const r of bucket.results ?? []) {
+      const model = r.model ?? "unknown";
+      const uncached = r.uncached_input_tokens ?? 0;
+      const cacheRead = r.cache_read_input_tokens ?? 0;
+      const cacheCreate = r.cache_creation_input_tokens ?? 0;
+      const output = r.output_tokens ?? 0;
+      if (uncached + cacheRead + cacheCreate + output === 0) continue;
+      const p = priceFor("anthropic", model);
+      const batch = r.service_tier === "batch" ? 0.5 : 1;
+      const cost = ((uncached * p.in + cacheRead * p.in * 0.1 + cacheCreate * p.in * 1.25 + output * p.out) / 1e6) * batch;
+      const wsId = r.workspace_id ?? "default";
+      rows.push({
+        date, teamId: wsId, teamName: r.workspace_id ? `Workspace ${String(wsId).slice(-6)}` : "Default workspace",
+        modelId: model, inputTokens: uncached + cacheRead + cacheCreate, outputTokens: output,
+        cachedTokens: cacheRead, requests: 0, errors: 0, cost,
+      });
+    }
+  }
+  return rows;
+}
+
+async function fetchAnthropic(adminKey: string, days: number): Promise<RawRow[]> {
+  const parts = await mapLimit(timeWindows(days), FETCH_CONCURRENCY, (w) => fetchAnthropicWindow(adminKey, w));
+  return dedupeRows(parts.flat());
+}
+
+async function fetchOpenAIWindow(adminKey: string, w: TimeWindow): Promise<RawRow[]> {
+  const qs = new URLSearchParams({
+    start_time: String(Math.floor(w.start.getTime() / 1000)),
+    end_time: String(Math.floor(w.end.getTime() / 1000)),
+    bucket_width: "1d",
+    limit: "31",
+  });
+  qs.append("group_by[]", "model");
+  qs.append("group_by[]", "project_id");
+  const res = await fetch(`https://api.openai.com/v1/organization/usage/completions?${qs}`, {
+    headers: { Authorization: `Bearer ${adminKey}` },
+  });
+  if (!res.ok) throw new Error(`OpenAI usage API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const json = await res.json();
+  const rows: RawRow[] = [];
+  for (const bucket of json.data ?? []) {
+    const date = isoDay(new Date((bucket.start_time ?? 0) * 1000));
+    for (const r of bucket.results ?? []) {
+      const model = r.model ?? "unknown";
+      const input = r.input_tokens ?? 0;
+      const cached = r.input_cached_tokens ?? 0;
+      const output = r.output_tokens ?? 0;
+      if (input + output === 0) continue;
+      const p = priceFor("openai", model);
+      const batch = r.batch === true ? 0.5 : 1;
+      const cost = (((input - cached) * p.in + cached * p.in * 0.5 + output * p.out) / 1e6) * batch;
+      const projId = r.project_id ?? "default";
+      rows.push({
+        date, teamId: projId, teamName: r.project_id ? `Project ${String(projId).slice(-6)}` : "Default project",
+        modelId: model, inputTokens: input, outputTokens: output, cachedTokens: cached,
+        requests: r.num_model_requests ?? 0, errors: 0, cost,
+      });
+    }
   }
   return rows;
 }
 
 async function fetchOpenAI(adminKey: string, days: number): Promise<RawRow[]> {
-  const startTime = Math.floor((Date.now() - days * DAY) / 1000);
-  const rows: RawRow[] = [];
-  let page: string | undefined;
-  for (let guard = 0; guard < 20; guard++) {
-    const qs = new URLSearchParams({ start_time: String(startTime), bucket_width: "1d", limit: "31" });
-    qs.append("group_by[]", "model");
-    qs.append("group_by[]", "project_id");
-    if (page) qs.set("page", page);
-    const res = await fetch(`https://api.openai.com/v1/organization/usage/completions?${qs}`, {
-      headers: { Authorization: `Bearer ${adminKey}` },
-    });
-    if (!res.ok) throw new Error(`OpenAI usage API ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const json = await res.json();
-    for (const bucket of json.data ?? []) {
-      const date = isoDay(new Date((bucket.start_time ?? 0) * 1000));
-      for (const r of bucket.results ?? []) {
-        const model = r.model ?? "unknown";
-        const input = r.input_tokens ?? 0;
-        const cached = r.input_cached_tokens ?? 0;
-        const output = r.output_tokens ?? 0;
-        if (input + output === 0) continue;
-        const p = priceFor("openai", model);
-        const batch = r.batch === true ? 0.5 : 1;
-        const cost = (((input - cached) * p.in + cached * p.in * 0.5 + output * p.out) / 1e6) * batch;
-        const projId = r.project_id ?? "default";
-        rows.push({
-          date, teamId: projId, teamName: r.project_id ? `Project ${String(projId).slice(-6)}` : "Default project",
-          modelId: model, inputTokens: input, outputTokens: output, cachedTokens: cached,
-          requests: r.num_model_requests ?? 0, errors: 0, cost,
-        });
-      }
-    }
-    if (!json.has_more || !json.next_page) break;
-    page = json.next_page;
-  }
-  return rows;
+  const parts = await mapLimit(timeWindows(days), FETCH_CONCURRENCY, (w) => fetchOpenAIWindow(adminKey, w));
+  return dedupeRows(parts.flat());
 }
 
 // ── actual billed cost (Cost API — the invoice truth) ───────────────────────────
@@ -137,47 +193,48 @@ async function fetchOpenAI(adminKey: string, days: number): Promise<RawRow[]> {
 // returns what the org was ACTUALLY billed (committed-use / batch discounts,
 // negotiated rates). Reconciling the two is the finance-grade differentiator.
 // Best-effort: a failure here must never break the usage response.
-async function fetchAnthropicBilled(adminKey: string, days: number): Promise<number> {
-  const end = new Date();
-  const start = new Date(end.getTime() - days * DAY);
+async function fetchAnthropicBilledWindow(adminKey: string, w: TimeWindow): Promise<number> {
+  const qs = new URLSearchParams({ starting_at: w.start.toISOString(), ending_at: w.end.toISOString(), bucket_width: "1d", limit: "31" });
+  const res = await fetch(`https://api.anthropic.com/v1/organizations/cost_report?${qs}`, {
+    headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
+  });
+  if (!res.ok) throw new Error(`Anthropic cost API ${res.status}`);
+  const json = await res.json();
   let total = 0;
-  let page: string | undefined;
-  for (let guard = 0; guard < 20; guard++) {
-    const qs = new URLSearchParams({ starting_at: start.toISOString(), ending_at: end.toISOString(), bucket_width: "1d", limit: "31" });
-    if (page) qs.set("page", page);
-    const res = await fetch(`https://api.anthropic.com/v1/organizations/cost_report?${qs}`, {
-      headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
-    });
-    if (!res.ok) throw new Error(`Anthropic cost API ${res.status}`);
-    const json = await res.json();
-    for (const bucket of json.data ?? []) {
-      for (const r of bucket.results ?? []) total += Number(r.amount ?? 0);
-    }
-    if (!json.has_more || !json.next_page) break;
-    page = json.next_page;
+  for (const bucket of json.data ?? []) {
+    for (const r of bucket.results ?? []) total += Number(r.amount ?? 0);
+  }
+  return total;
+}
+
+async function fetchAnthropicBilled(adminKey: string, days: number): Promise<number> {
+  // Non-overlapping (exclusive-end) windows → summing per-window totals is exact.
+  const parts = await mapLimit(timeWindows(days), FETCH_CONCURRENCY, (w) => fetchAnthropicBilledWindow(adminKey, w));
+  return parts.reduce((s, v) => s + v, 0);
+}
+
+async function fetchOpenAIBilledWindow(adminKey: string, w: TimeWindow): Promise<number> {
+  const qs = new URLSearchParams({
+    start_time: String(Math.floor(w.start.getTime() / 1000)),
+    end_time: String(Math.floor(w.end.getTime() / 1000)),
+    bucket_width: "1d",
+    limit: "31",
+  });
+  const res = await fetch(`https://api.openai.com/v1/organization/costs?${qs}`, {
+    headers: { Authorization: `Bearer ${adminKey}` },
+  });
+  if (!res.ok) throw new Error(`OpenAI cost API ${res.status}`);
+  const json = await res.json();
+  let total = 0;
+  for (const bucket of json.data ?? []) {
+    for (const r of bucket.results ?? []) total += Number(r.amount?.value ?? 0);
   }
   return total;
 }
 
 async function fetchOpenAIBilled(adminKey: string, days: number): Promise<number> {
-  const startTime = Math.floor((Date.now() - days * DAY) / 1000);
-  let total = 0;
-  let page: string | undefined;
-  for (let guard = 0; guard < 20; guard++) {
-    const qs = new URLSearchParams({ start_time: String(startTime), bucket_width: "1d", limit: "31" });
-    if (page) qs.set("page", page);
-    const res = await fetch(`https://api.openai.com/v1/organization/costs?${qs}`, {
-      headers: { Authorization: `Bearer ${adminKey}` },
-    });
-    if (!res.ok) throw new Error(`OpenAI cost API ${res.status}`);
-    const json = await res.json();
-    for (const bucket of json.data ?? []) {
-      for (const r of bucket.results ?? []) total += Number(r.amount?.value ?? 0);
-    }
-    if (!json.has_more || !json.next_page) break;
-    page = json.next_page;
-  }
-  return total;
+  const parts = await mapLimit(timeWindows(days), FETCH_CONCURRENCY, (w) => fetchOpenAIBilledWindow(adminKey, w));
+  return parts.reduce((s, v) => s + v, 0);
 }
 
 // ── normalize → Dataset ──────────────────────────────────────────────────────
@@ -256,6 +313,9 @@ async function saveCredential(provider: Provider, adminKey: string): Promise<voi
         key_encrypted = excluded.key_encrypted,
         key_iv = excluded.key_iv,
         updated_at = now()`;
+    // Invalidate any cached datasets — the key just changed, so cached data may
+    // belong to a different key/org. Best-effort (table may not exist yet).
+    await sql`delete from app_usage_cache where true`.catch(() => {});
   } finally {
     await sql.end({ timeout: 5 });
   }

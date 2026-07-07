@@ -58,31 +58,40 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   // Fetch live data through the proxy and reconcile UI + cache. Shared by the
   // on-open auto-load and the manual refresh. `force` bypasses the server cache.
   const loadLive = useCallback(
-    (force: boolean, signal?: { cancelled: boolean }) => {
+    async (force: boolean, signal?: { cancelled: boolean }) => {
       if (!getProxyUrl()) return;
       setIsRefreshing(true);
-      fetchLiveUsage({ days: 90, refresh: force })
-        .then((ds) => {
+      try {
+        // Progressive first paint only when cold (no cached live data shown yet):
+        // a quick 30-day window fills the default 30D view in one request, then the
+        // full 90-day history backfills. With a warm cache or a manual refresh we
+        // already show full data, so skip straight to 90d to avoid a visible shrink.
+        if (!cached && !force) {
+          const quick = await fetchLiveUsage({ days: 30 });
           if (signal?.cancelled) return;
-          setDataset(ds);
+          setDataset(quick);
           setMode("key");
-          writeLiveCache(ds);
-        })
-        .catch((e: unknown) => {
-          if (signal?.cancelled) return;
-          // Key removed server-side → drop the stale cache and fall back to demo.
-          if (e instanceof NoKeyError) {
-            clearLiveCache();
-            setDataset(demo);
-            setMode("demo");
-          }
-          // Transient / provider error → keep whatever we're showing (cache or demo).
-        })
-        .finally(() => {
-          if (!signal?.cancelled) setIsRefreshing(false);
-        });
+          writeLiveCache(quick);
+        }
+        const full = await fetchLiveUsage({ days: 90, refresh: force });
+        if (signal?.cancelled) return;
+        setDataset(full);
+        setMode("key");
+        writeLiveCache(full);
+      } catch (e: unknown) {
+        if (signal?.cancelled) return;
+        // Key removed server-side → drop the stale cache and fall back to demo.
+        if (e instanceof NoKeyError) {
+          clearLiveCache();
+          setDataset(demo);
+          setMode("demo");
+        }
+        // Transient / provider error → keep whatever we're showing (cache or demo).
+      } finally {
+        if (!signal?.cancelled) setIsRefreshing(false);
+      }
     },
-    [demo],
+    [demo, cached],
   );
 
   // Auto-load on open: if a proxy is wired and a key was connected earlier, pull
@@ -107,7 +116,20 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       connectLive: (ds: Dataset, m: DataMode = "key") => {
         setDataset(ds);
         setMode(m);
-        if (m === "key") writeLiveCache(ds);
+        if (m !== "key") return;
+        writeLiveCache(ds);
+        // The dialog fetches a quick 30-day window for a fast first paint;
+        // backfill the full 90-day history in the background.
+        setIsRefreshing(true);
+        fetchLiveUsage({ days: 90 })
+          .then((full) => {
+            setDataset(full);
+            writeLiveCache(full);
+          })
+          .catch(() => {
+            /* keep the quick window on any backfill error */
+          })
+          .finally(() => setIsRefreshing(false));
       },
       refresh: () => loadLive(true),
     }),
