@@ -11,7 +11,7 @@
  * alerting / budget views have something real to show.
  */
 
-import type { Dataset, Model, Provider, Team, UsageRow } from "@/lib/types";
+import type { BillingReconciliation, Dataset, Model, Provider, ProviderId, Team, UsageRow } from "@/lib/types";
 
 // ── seeded RNG (mulberry32) ────────────────────────────────────────────────
 function mulberry32(seed: number): () => number {
@@ -61,25 +61,186 @@ interface TeamCfg {
   cache: number; // cache affinity 0..1
   util: number; // target forecast/budget utilization (drives monthlyBudget)
   errRate: number;
+  headcount: number; // engineers on the team (drives headcount-based chargeback)
+  shared?: boolean; // shared/platform cost center — its spend is the chargeback pool
 }
 
 const TEAMS: TeamCfg[] = [
   // Engineering
-  { id: "platform-eng", name: "Platform Eng", department: "Engineering", scale: 2.6, weights: { "claude-sonnet-4": 5, "gpt-4o": 3, o3: 2, "claude-opus-4": 1 }, avgInTokens: 3200, cache: 0.55, util: 0.71, errRate: 0.004 },
-  { id: "core-product", name: "Core Product", department: "Engineering", scale: 3.0, weights: { "gpt-4o": 4, "claude-sonnet-4": 4, "gpt-4o-mini": 2 }, avgInTokens: 2400, cache: 0.48, util: 0.83, errRate: 0.005 },
-  { id: "data-ml", name: "Data & ML", department: "Engineering", scale: 2.2, weights: { o3: 4, "claude-opus-4": 3, "gemini-2.5-pro": 3 }, avgInTokens: 5200, cache: 0.3, util: 0.64, errRate: 0.006 },
-  { id: "devex", name: "Developer Experience", department: "Engineering", scale: 1.2, weights: { "claude-sonnet-4": 5, "gpt-4o-mini": 5 }, avgInTokens: 1800, cache: 0.62, util: 0.52, errRate: 0.004 },
+  {
+    id: "platform-eng",
+    name: "Platform Eng",
+    department: "Engineering",
+    scale: 2.6,
+    weights: { "claude-sonnet-4": 5, "gpt-4o": 3, o3: 2, "claude-opus-4": 1 },
+    avgInTokens: 3200,
+    cache: 0.55,
+    util: 0.71,
+    errRate: 0.004,
+    headcount: 14,
+  },
+  {
+    id: "core-product",
+    name: "Core Product",
+    department: "Engineering",
+    scale: 3.0,
+    weights: { "gpt-4o": 4, "claude-sonnet-4": 4, "gpt-4o-mini": 2 },
+    avgInTokens: 2400,
+    cache: 0.48,
+    util: 0.83,
+    errRate: 0.005,
+    headcount: 22,
+  },
+  {
+    id: "data-ml",
+    name: "Data & ML",
+    department: "Engineering",
+    scale: 2.2,
+    weights: { o3: 4, "claude-opus-4": 3, "gemini-2.5-pro": 3 },
+    avgInTokens: 5200,
+    cache: 0.3,
+    util: 0.64,
+    errRate: 0.006,
+    headcount: 9,
+  },
+  {
+    id: "devex",
+    name: "Developer Experience",
+    department: "Engineering",
+    scale: 1.2,
+    weights: { "claude-sonnet-4": 5, "gpt-4o-mini": 5 },
+    avgInTokens: 1800,
+    cache: 0.62,
+    util: 0.52,
+    errRate: 0.004,
+    headcount: 6,
+  },
   // Customer
-  { id: "support-copilot", name: "Support Copilot", department: "Customer", scale: 4.2, weights: { "gpt-4o-mini": 6, "claude-haiku": 0, "claude-sonnet-4": 3, "gpt-4o": 1 }, avgInTokens: 1500, cache: 0.72, util: 0.94, errRate: 0.007 },
-  { id: "customer-success", name: "Customer Success", department: "Customer", scale: 1.0, weights: { "gpt-4o": 5, "claude-sonnet-4": 5 }, avgInTokens: 2000, cache: 0.4, util: 0.58, errRate: 0.005 },
-  { id: "solutions-eng", name: "Solutions Eng", department: "Customer", scale: 0.9, weights: { "claude-sonnet-4": 6, "gpt-4o": 4 }, avgInTokens: 2600, cache: 0.45, util: 0.61, errRate: 0.004 },
+  {
+    id: "support-copilot",
+    name: "Support Copilot",
+    department: "Customer",
+    scale: 4.2,
+    weights: { "gpt-4o-mini": 6, "claude-sonnet-4": 3, "gpt-4o": 1 },
+    avgInTokens: 1500,
+    cache: 0.72,
+    util: 0.94,
+    errRate: 0.007,
+    headcount: 18,
+  },
+  {
+    id: "customer-success",
+    name: "Customer Success",
+    department: "Customer",
+    scale: 1.0,
+    weights: { "gpt-4o": 5, "claude-sonnet-4": 5 },
+    avgInTokens: 2000,
+    cache: 0.4,
+    util: 0.58,
+    errRate: 0.005,
+    headcount: 11,
+  },
+  {
+    id: "solutions-eng",
+    name: "Solutions Eng",
+    department: "Customer",
+    scale: 0.9,
+    weights: { "claude-sonnet-4": 6, "gpt-4o": 4 },
+    avgInTokens: 2600,
+    cache: 0.45,
+    util: 0.61,
+    errRate: 0.004,
+    headcount: 7,
+  },
   // Growth
-  { id: "marketing", name: "Marketing", department: "Growth", scale: 1.6, weights: { "gpt-4o": 6, "gemini-2.5-pro": 4 }, avgInTokens: 2200, cache: 0.35, util: 0.68, errRate: 0.006 },
-  { id: "content-seo", name: "Content & SEO", department: "Growth", scale: 2.0, weights: { "gpt-4o": 5, "gemini-2.5-pro": 3, "claude-sonnet-4": 2 }, avgInTokens: 3400, cache: 0.42, util: 0.77, errRate: 0.005 },
-  { id: "growth-eng", name: "Growth Eng", department: "Growth", scale: 1.1, weights: { "claude-sonnet-4": 4, "gpt-4o": 3, o3: 3 }, avgInTokens: 2800, cache: 0.5, util: 1.08, errRate: 0.009 },
+  {
+    id: "marketing",
+    name: "Marketing",
+    department: "Growth",
+    scale: 1.6,
+    weights: { "gpt-4o": 6, "gemini-2.5-pro": 4 },
+    avgInTokens: 2200,
+    cache: 0.35,
+    util: 0.68,
+    errRate: 0.006,
+    headcount: 8,
+  },
+  {
+    id: "content-seo",
+    name: "Content & SEO",
+    department: "Growth",
+    scale: 2.0,
+    weights: { "gpt-4o": 5, "gemini-2.5-pro": 3, "claude-sonnet-4": 2 },
+    avgInTokens: 3400,
+    cache: 0.42,
+    util: 0.77,
+    errRate: 0.005,
+    headcount: 5,
+  },
+  {
+    id: "growth-eng",
+    name: "Growth Eng",
+    department: "Growth",
+    scale: 1.1,
+    weights: { "claude-sonnet-4": 4, "gpt-4o": 3, o3: 3 },
+    avgInTokens: 2800,
+    cache: 0.5,
+    util: 1.08,
+    errRate: 0.009,
+    headcount: 6,
+  },
   // Operations
-  { id: "revops", name: "RevOps", department: "Operations", scale: 0.8, weights: { "gpt-4o": 5, "gpt-4o-mini": 5 }, avgInTokens: 1900, cache: 0.5, util: 0.55, errRate: 0.004 },
-  { id: "legal-compliance", name: "Legal & Compliance", department: "Operations", scale: 0.35, weights: { "claude-opus-4": 6, "claude-sonnet-4": 4 }, avgInTokens: 6800, cache: 0.25, util: 0.41, errRate: 0.003 },
+  {
+    id: "revops",
+    name: "RevOps",
+    department: "Operations",
+    scale: 0.8,
+    weights: { "gpt-4o": 5, "gpt-4o-mini": 5 },
+    avgInTokens: 1900,
+    cache: 0.5,
+    util: 0.55,
+    errRate: 0.004,
+    headcount: 5,
+  },
+  {
+    id: "legal-compliance",
+    name: "Legal & Compliance",
+    department: "Operations",
+    scale: 0.35,
+    weights: { "claude-opus-4": 6, "claude-sonnet-4": 4 },
+    avgInTokens: 6800,
+    cache: 0.25,
+    util: 0.41,
+    errRate: 0.003,
+    headcount: 4,
+  },
+  // Shared services — not budget-owned; this spend is the chargeback pool
+  {
+    id: "shared-platform",
+    name: "Shared Platform / Infra",
+    department: "Shared Services",
+    scale: 1.4,
+    weights: { "claude-sonnet-4": 4, "gpt-4o": 3, "gpt-4o-mini": 3 },
+    avgInTokens: 2600,
+    cache: 0.6,
+    util: 0.5,
+    errRate: 0.004,
+    headcount: 0,
+    shared: true,
+  },
+  {
+    id: "evals-rnd",
+    name: "Evals & Prompt R&D",
+    department: "Shared Services",
+    scale: 0.9,
+    weights: { o3: 3, "claude-opus-4": 3, "claude-sonnet-4": 4 },
+    avgInTokens: 4200,
+    cache: 0.35,
+    util: 0.5,
+    errRate: 0.006,
+    headcount: 0,
+    shared: true,
+  },
 ];
 
 // injected anomalies: teamId, days-before-end, duration, spend multiplier
@@ -111,14 +272,15 @@ function buildDataset(days = 90): Dataset {
 
   TEAMS.forEach((team) => {
     // normalize model weights (drop any zero/unknown)
-    const entries = Object.entries(team.weights).filter(
-      ([id, w]) => modelById[id] && (w ?? 0) > 0,
-    ) as [string, number][];
+    const entries = Object.entries(team.weights).filter(([id, w]) => modelById[id] && (w ?? 0) > 0) as [
+      string,
+      number,
+    ][];
     const wsum = entries.reduce((s, [, w]) => s + w, 0);
     const mix = entries.map(([id, w]) => ({ id, p: w / wsum }));
 
     dates.forEach((date, di) => {
-      const dow = new Date(date + "T00:00:00").getDay();
+      const dow = new Date(`${date}T00:00:00`).getDay();
       const weekend = dow === 0 || dow === 6 ? 0.5 : 1;
       const trend = 0.78 + (di / days) * 0.42; // gradual adoption growth
       const noise = 0.85 + rng() * 0.3;
@@ -179,9 +341,43 @@ function buildDataset(days = 90): Dataset {
       name: t.name,
       department: t.department,
       monthlyBudget: Math.max(500, Math.round(budget / 100) * 100),
+      headcount: t.headcount || undefined,
+      shared: t.shared,
     };
   });
   const orgMonthlyBudget = Math.round(teams.reduce((s, t) => s + t.monthlyBudget, 0) / 1000) * 1000;
+
+  // ── invoice reconciliation (demo) ──────────────────────────────────────────
+  // Our per-row `cost` is list-price (with cached tokens already at 10%). The
+  // ACTUAL bill is lower still — committed-use + batch discounts our token math
+  // can't see. Synthesize a plausible billed figure per provider over the last
+  // 30 days so the reconciliation view has real numbers to explain.
+  const EXTRA_DISCOUNT: Record<ProviderId, number> = {
+    anthropic: 0.14, // committed-use + batch on top of caching
+    openai: 0.09,
+    google: 0.06,
+  };
+  const modelProvider = new Map<string, ProviderId>(MODELS.map((m) => [m.id, m.provider]));
+  const estByProvider = new Map<ProviderId, number>();
+  usage.forEach((r) => {
+    if (!last30Set.has(r.date)) return;
+    const p = modelProvider.get(r.modelId);
+    if (!p) return;
+    estByProvider.set(p, (estByProvider.get(p) ?? 0) + r.cost);
+  });
+  const byProvider = [...estByProvider.entries()].map(([provider, estimated]) => ({
+    provider,
+    estimated,
+    billed: estimated * (1 - EXTRA_DISCOUNT[provider]),
+  }));
+  const billing: BillingReconciliation = {
+    estimatedCost: byProvider.reduce((s, p) => s + p.estimated, 0),
+    billedCost: byProvider.reduce((s, p) => s + p.billed, 0),
+    source: "cost-api",
+    from: last30[0],
+    to: last30[last30.length - 1],
+    byProvider,
+  };
 
   return {
     org: "Acme Corp",
@@ -193,6 +389,7 @@ function buildDataset(days = 90): Dataset {
     models: MODELS,
     teams,
     usage,
+    billing,
   };
 }
 

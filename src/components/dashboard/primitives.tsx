@@ -1,7 +1,7 @@
 import { ArrowDownRight, ArrowUpRight, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
 import { fmtPctDelta } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 export function CapsLabel({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("label-caps", className)}>{children}</div>;
@@ -36,7 +36,9 @@ export function DeltaBadge({
         flat
           ? undefined
           : {
-              backgroundColor: isGood ? "color-mix(in oklab, var(--status-good) 14%, transparent)" : "color-mix(in oklab, var(--status-critical) 16%, transparent)",
+              backgroundColor: isGood
+                ? "color-mix(in oklab, var(--status-good) 14%, transparent)"
+                : "color-mix(in oklab, var(--status-critical) 16%, transparent)",
               color: isGood ? "var(--status-good)" : "var(--status-critical)",
             }
       }
@@ -76,7 +78,9 @@ export function StatTile({
       )}
       <div className="flex items-center justify-between">
         <CapsLabel>{label}</CapsLabel>
-        {Icon && <Icon className={cn("h-4 w-4", accent ? "text-primary" : "text-muted-foreground")} strokeWidth={1.75} />}
+        {Icon && (
+          <Icon className={cn("h-4 w-4", accent ? "text-primary" : "text-muted-foreground")} strokeWidth={1.75} />
+        )}
       </div>
       <div className="mt-3 flex items-end gap-2">
         <div className="tnum text-[28px] font-semibold leading-none tracking-tight text-foreground">{value}</div>

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { PersonaView } from "@/lib/types";
-import { Sidebar } from "./Sidebar";
-import { Topbar } from "./Topbar";
+import { AuditView } from "@/views/AuditView";
 import { ExecutiveView } from "@/views/ExecutiveView";
 import { PlatformView } from "@/views/PlatformView";
 import { TeamsView } from "@/views/TeamsView";
-import { AuditView } from "@/views/AuditView";
+import { Sidebar } from "./Sidebar";
+import { Topbar } from "./Topbar";
 
 export function AppShell() {
   const [view, setView] = useState<PersonaView>("executive");

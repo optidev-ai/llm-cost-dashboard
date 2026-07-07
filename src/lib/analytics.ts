@@ -2,10 +2,36 @@
  * Pure selectors over a Dataset. All views read through these so Mode ①/②/③
  * share identical downstream math — only the row source differs.
  */
-import type { Dataset, DateRange, UsageRow } from "./types";
+import type { Dataset, DateRange, ProviderReconcile, Team, UsageRow } from "./types";
 
 export function rowsInRange(ds: Dataset, range: DateRange): UsageRow[] {
   return ds.usage.filter((r) => r.date >= range.from && r.date <= range.to);
+}
+
+// ── source capabilities ───────────────────────────────────────────────────────
+export interface DatasetCapabilities {
+  hasRequests: boolean;
+  hasLatency: boolean;
+  hasErrors: boolean;
+}
+
+/**
+ * Which metrics the underlying source actually populates. Billing-API data
+ * (Mode ②) reports tokens & cost but zeroes request counts, latency and errors,
+ * so views can hide or annotate those panels instead of rendering misleading
+ * `$0.00` / `0%`. Derived from data presence, so it stays source-agnostic.
+ */
+export function capabilities(ds: Dataset): DatasetCapabilities {
+  let hasRequests = false;
+  let hasLatency = false;
+  let hasErrors = false;
+  for (const r of ds.usage) {
+    if (r.requests > 0) hasRequests = true;
+    if (r.latencyP95 > 0) hasLatency = true;
+    if (r.errors > 0) hasErrors = true;
+    if (hasRequests && hasLatency && hasErrors) break;
+  }
+  return { hasRequests, hasLatency, hasErrors };
 }
 
 function sum<T>(arr: T[], f: (t: T) => number): number {
@@ -62,13 +88,11 @@ export interface NamedSpend {
   share: number;
 }
 
-function groupSpend(
-  rows: UsageRow[],
-  keyer: (r: UsageRow) => string,
-  namer: (k: string) => string,
-): NamedSpend[] {
+function groupSpend(rows: UsageRow[], keyer: (r: UsageRow) => string, namer: (k: string) => string): NamedSpend[] {
   const m = new Map<string, number>();
-  rows.forEach((r) => m.set(keyer(r), (m.get(keyer(r)) ?? 0) + r.cost));
+  rows.forEach((r) => {
+    m.set(keyer(r), (m.get(keyer(r)) ?? 0) + r.cost);
+  });
   const total = [...m.values()].reduce((s, v) => s + v, 0) || 1;
   return [...m.entries()]
     .map(([key, cost]) => ({ key, name: namer(key), cost, share: cost / total }))
@@ -77,29 +101,47 @@ function groupSpend(
 
 export function spendByTeam(ds: Dataset, rows: UsageRow[]): NamedSpend[] {
   const name = new Map(ds.teams.map((t) => [t.id, t.name]));
-  return groupSpend(rows, (r) => r.teamId, (k) => name.get(k) ?? k);
+  return groupSpend(
+    rows,
+    (r) => r.teamId,
+    (k) => name.get(k) ?? k,
+  );
 }
 
 export function spendByDept(ds: Dataset, rows: UsageRow[]): NamedSpend[] {
   const dept = new Map(ds.teams.map((t) => [t.id, t.department]));
-  return groupSpend(rows, (r) => dept.get(r.teamId) ?? "—", (k) => k);
+  return groupSpend(
+    rows,
+    (r) => dept.get(r.teamId) ?? "—",
+    (k) => k,
+  );
 }
 
 export function spendByModel(ds: Dataset, rows: UsageRow[]): NamedSpend[] {
   const name = new Map(ds.models.map((m) => [m.id, m.name]));
-  return groupSpend(rows, (r) => r.modelId, (k) => name.get(k) ?? k);
+  return groupSpend(
+    rows,
+    (r) => r.modelId,
+    (k) => name.get(k) ?? k,
+  );
 }
 
 export function spendByProvider(ds: Dataset, rows: UsageRow[]): NamedSpend[] {
   const prov = new Map<string, string>(ds.models.map((m) => [m.id, m.provider]));
   const name = new Map<string, string>(ds.providers.map((p) => [p.id, p.name]));
-  return groupSpend(rows, (r) => prov.get(r.modelId) ?? "—", (k) => name.get(k) ?? k);
+  return groupSpend(
+    rows,
+    (r) => prov.get(r.modelId) ?? "—",
+    (k) => name.get(k) ?? k,
+  );
 }
 
 /** Daily total spend across the range. */
 export function dailySpend(rows: UsageRow[]): { date: string; cost: number }[] {
   const m = new Map<string, number>();
-  rows.forEach((r) => m.set(r.date, (m.get(r.date) ?? 0) + r.cost));
+  rows.forEach((r) => {
+    m.set(r.date, (m.get(r.date) ?? 0) + r.cost);
+  });
   return [...m.entries()].map(([date, cost]) => ({ date, cost })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -111,11 +153,7 @@ export function departments(ds: Dataset, rows: UsageRow[], cap = 6): string[] {
 }
 
 /** Daily spend split into one column per department (stacked-area friendly). */
-export function dailyByDept(
-  ds: Dataset,
-  rows: UsageRow[],
-  depts: string[],
-): Record<string, number | string>[] {
+export function dailyByDept(ds: Dataset, rows: UsageRow[], depts: string[]): Record<string, number | string>[] {
   const inSet = new Set(depts);
   const hasOther = inSet.has("Other");
   const dept = new Map(ds.teams.map((t) => [t.id, t.department]));
@@ -131,14 +169,16 @@ export function dailyByDept(
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, d]) => {
       const row: Record<string, number | string> = { date };
-      depts.forEach((dep) => (row[dep] = d[dep] ?? 0));
+      depts.forEach((dep) => {
+        row[dep] = d[dep] ?? 0;
+      });
       return row;
     });
 }
 
 // ── month-based finance math ─────────────────────────────────────────────────
 function monthStart(iso: string): string {
-  return iso.slice(0, 7) + "-01";
+  return `${iso.slice(0, 7)}-01`;
 }
 function daysInMonth(iso: string): number {
   const [y, m] = iso.split("-").map(Number);
@@ -202,15 +242,29 @@ export function budgetByTeam(ds: Dataset): TeamBudget[] {
   const mtdByTeam = new Map<string, number>();
   ds.usage
     .filter((r) => r.date >= ms && r.date <= ds.endDate)
-    .forEach((r) => mtdByTeam.set(r.teamId, (mtdByTeam.get(r.teamId) ?? 0) + r.cost));
+    .forEach((r) => {
+      mtdByTeam.set(r.teamId, (mtdByTeam.get(r.teamId) ?? 0) + r.cost);
+    });
 
+  // Shared/platform cost centers aren't budget-owned — excluded from the
+  // per-team accountability table (their spend surfaces via chargeback instead).
   return ds.teams
+    .filter((t) => !t.shared)
     .map((t) => {
       const mtd = mtdByTeam.get(t.id) ?? 0;
       const forecast = elapsed > 0 ? mtd / elapsed : mtd;
       const util = t.monthlyBudget ? forecast / t.monthlyBudget : 0;
       const status: BudgetStatus = util >= 1 ? "over" : util >= 0.85 ? "watch" : "under";
-      return { teamId: t.id, name: t.name, department: t.department, budget: t.monthlyBudget, mtd, forecast, util, status };
+      return {
+        teamId: t.id,
+        name: t.name,
+        department: t.department,
+        budget: t.monthlyBudget,
+        mtd,
+        forecast,
+        util,
+        status,
+      };
     })
     .sort((a, b) => b.util - a.util);
 }
@@ -227,7 +281,12 @@ export interface BudgetAlert {
 export function budgetAlerts(ds: Dataset): BudgetAlert[] {
   return budgetByTeam(ds)
     .filter((b) => b.util >= 0.9)
-    .map((b) => ({ teamId: b.teamId, name: b.name, util: b.util, level: b.util >= 1 ? "critical" : "warning" as const }));
+    .map((b) => ({
+      teamId: b.teamId,
+      name: b.name,
+      util: b.util,
+      level: b.util >= 1 ? "critical" : ("warning" as const),
+    }));
 }
 
 export interface Anomaly {
@@ -252,7 +311,10 @@ export function anomalies(ds: Dataset, mult = 3): Anomaly[] {
   byTeam.forEach((series, teamId) => {
     const days = [...series.entries()].sort((a, b) => a[0].localeCompare(b[0]));
     for (let i = 7; i < days.length; i++) {
-      const window = days.slice(i - 7, i).map(([, c]) => c).sort((a, b) => a - b);
+      const window = days
+        .slice(i - 7, i)
+        .map(([, c]) => c)
+        .sort((a, b) => a - b);
       const median = window[Math.floor(window.length / 2)] || 0;
       const [date, cost] = days[i];
       if (median > 0 && cost > median * mult) {
@@ -273,7 +335,7 @@ export interface Mover {
 }
 export function topMovers(ds: Dataset, limit = 5): Mover[] {
   const end = ds.endDate;
-  const endD = new Date(end + "T00:00:00");
+  const endD = new Date(`${end}T00:00:00`);
   const cut = (n: number) => {
     const d = new Date(endD);
     d.setDate(endD.getDate() - n);
@@ -300,4 +362,133 @@ export function topMovers(ds: Dataset, limit = 5): Mover[] {
     }))
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
     .slice(0, limit);
+}
+
+// ── invoice reconciliation ─────────────────────────────────────────────────────
+export interface Reconciliation {
+  /** Actual billed cost (Cost API, or the user-entered invoice total). */
+  billed: number;
+  /** Our token × list-price estimate over the same window. */
+  estimated: number;
+  /** billed − estimated (negative = billed below list price). */
+  delta: number;
+  /** delta / estimated; negative = effective discount vs list price. */
+  deltaPct: number;
+  /** true when billed < estimated (discounts / caching / batch working). */
+  underList: boolean;
+  source: "cost-api" | "invoice";
+  from: string;
+  to: string;
+  byProvider: ProviderReconcile[];
+}
+
+/**
+ * Reconcile the list-price estimate against actual billed cost.
+ *
+ * `invoiceTotal`, when provided (> 0), overrides the Cost-API billed figure —
+ * the last-mile check against the real invoice, which can include taxes,
+ * minimums and credits the Cost API omits. Returns null when the dataset
+ * carries no billing truth (nothing to reconcile against yet).
+ */
+export function reconcile(ds: Dataset, invoiceTotal?: number): Reconciliation | null {
+  const b = ds.billing;
+  if (!b) return null;
+  const estimated = b.estimatedCost;
+  const useInvoice = invoiceTotal !== undefined && invoiceTotal > 0;
+  const billed = useInvoice ? invoiceTotal : b.billedCost;
+  const delta = billed - estimated;
+  return {
+    billed,
+    estimated,
+    delta,
+    deltaPct: estimated ? delta / estimated : 0,
+    underList: delta < 0,
+    source: useInvoice ? "invoice" : b.source,
+    from: b.from,
+    to: b.to,
+    byProvider: b.byProvider ?? [],
+  };
+}
+
+// ── chargeback (real cost allocation) ───────────────────────────────────────────
+export type AllocationMethod = "usage" | "equal" | "headcount";
+
+export interface ChargebackRow {
+  teamId: string;
+  name: string;
+  department: string;
+  /** The team's own, directly-attributed spend (this is showback). */
+  direct: number;
+  /** Its share of the shared/unallocated pool (0 in showback). */
+  allocated: number;
+  /** direct + allocated. */
+  total: number;
+  /** total / grand total. */
+  share: number;
+}
+
+export interface Chargeback {
+  rows: ChargebackRow[];
+  /** Sum of shared/unallocated cost centers over the range. */
+  sharedPool: number;
+  /** Directly-attributed spend across budget-owned teams. */
+  directTotal: number;
+  /** Method requested. */
+  method: AllocationMethod;
+  /** Method actually applied (falls back to "equal" if headcount is unavailable). */
+  effectiveMethod: AllocationMethod;
+}
+
+/**
+ * Real chargeback allocation. Showback = each team's `direct` cost only, with the
+ * shared pool left explicit. Chargeback distributes that shared pool across the
+ * budget-owned teams by the chosen driver (usage share / equal split / headcount),
+ * so every dollar lands on a team and the totals tie out to the full bill. This
+ * is the genuine allocation math a cosmetic showback/chargeback relabel skips.
+ */
+export function chargeback(ds: Dataset, rows: UsageRow[], method: AllocationMethod = "usage"): Chargeback {
+  const teamById = new Map(ds.teams.map((t) => [t.id, t]));
+  const isShared = (id: string): boolean => teamById.get(id)?.shared === true;
+
+  // direct spend per budget-owned team; shared spend → the pool
+  const direct = new Map<string, number>();
+  let sharedPool = 0;
+  for (const r of rows) {
+    if (isShared(r.teamId)) sharedPool += r.cost;
+    else direct.set(r.teamId, (direct.get(r.teamId) ?? 0) + r.cost);
+  }
+
+  const teams = ds.teams.filter((t) => !t.shared);
+  const directTotal = [...direct.values()].reduce((s, v) => s + v, 0);
+
+  // headcount allocation needs headcount on every team; else fall back to equal
+  const canHeadcount = teams.length > 0 && teams.every((t) => (t.headcount ?? 0) > 0);
+  const effectiveMethod: AllocationMethod = method === "headcount" && !canHeadcount ? "equal" : method;
+
+  const weightOf = (t: Team): number => {
+    if (effectiveMethod === "usage") return direct.get(t.id) ?? 0;
+    if (effectiveMethod === "headcount") return t.headcount ?? 0;
+    return 1; // equal
+  };
+  const weightSum = teams.reduce((s, t) => s + weightOf(t), 0) || 1;
+  const grand = directTotal + sharedPool || 1;
+
+  const cbRows: ChargebackRow[] = teams
+    .map((t) => {
+      const d = direct.get(t.id) ?? 0;
+      const allocated = (weightOf(t) / weightSum) * sharedPool;
+      const total = d + allocated;
+      return {
+        teamId: t.id,
+        name: t.name,
+        department: t.department,
+        direct: d,
+        allocated,
+        total,
+        share: total / grand,
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  return { rows: cbRows, sharedPool, directTotal, method, effectiveMethod };
 }

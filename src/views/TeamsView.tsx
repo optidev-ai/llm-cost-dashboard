@@ -1,25 +1,12 @@
-import { useMemo, useState } from "react";
 import { CircleDollarSign, TrendingUp, Users, Wallet } from "lucide-react";
-import { useDashboard } from "@/lib/datasource";
-import {
-  budgetByTeam,
-  dailySpend,
-  kpis,
-  rowsInRange,
-  spendByModel,
-  spendByTeam,
-} from "@/lib/analytics";
-import { modelColor } from "@/lib/palette";
-import { fmtCompact, fmtCurrency, fmtPct } from "@/lib/format";
-import { DeltaBadge, SectionCard, StatTile } from "@/components/dashboard/primitives";
+import { useMemo, useState } from "react";
 import { MixDonut, SpendAreaChart } from "@/components/dashboard/charts";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { DeltaBadge, SectionCard, StatTile } from "@/components/dashboard/primitives";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { budgetByTeam, dailySpend, kpis, rowsInRange, spendByModel, spendByTeam } from "@/lib/analytics";
+import { useDashboard } from "@/lib/datasource";
+import { fmtCompact, fmtCurrency, fmtPct } from "@/lib/format";
+import { modelColor } from "@/lib/palette";
 
 export function TeamsView() {
   const { dataset, range } = useDashboard();
@@ -33,10 +20,7 @@ export function TeamsView() {
   const k = useMemo(() => kpis(teamRows), [teamRows]);
   const budget = useMemo(() => budgetByTeam(dataset).find((b) => b.teamId === teamId), [dataset, teamId]);
   const models = useMemo(() => spendByModel(dataset, teamRows), [dataset, teamRows]);
-  const daily = useMemo(
-    () => dailySpend(teamRows).map((d) => ({ date: d.date, Spend: d.cost })),
-    [teamRows],
-  );
+  const daily = useMemo(() => dailySpend(teamRows).map((d) => ({ date: d.date, Spend: d.cost })), [teamRows]);
   const rank = ranked.findIndex((t) => t.key === teamId) + 1;
   const team = dataset.teams.find((t) => t.id === teamId);
   const orgShare = ranked.find((t) => t.key === teamId)?.share ?? 0;
@@ -59,13 +43,19 @@ export function TeamsView() {
         </Select>
         <div className="text-xs text-muted-foreground">
           {team?.department && <span className="mr-3">{team.department}</span>}
-          Rank <span className="tnum text-foreground">#{rank}</span> of {ranked.length} · {fmtPct(orgShare * 100)} of org spend
+          Rank <span className="tnum text-foreground">#{rank}</span> of {ranked.length} · {fmtPct(orgShare * 100)} of
+          org spend
         </div>
       </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile label={`Spend · ${range.label}`} value={fmtCurrency(k.spend)} icon={CircleDollarSign} sub={`${fmtCompact(k.tokens)} tokens`} />
+        <StatTile
+          label={`Spend · ${range.label}`}
+          value={fmtCurrency(k.spend)}
+          icon={CircleDollarSign}
+          sub={`${fmtCompact(k.tokens)} tokens`}
+        />
         <StatTile
           label="Forecast · month-end"
           value={budget ? fmtCurrency(budget.forecast) : "—"}
@@ -79,7 +69,12 @@ export function TeamsView() {
           icon={Wallet}
           sub={budget ? `of ${fmtCurrency(budget.budget)}/mo` : undefined}
         />
-        <StatTile label="Requests" value={k.requests ? fmtCompact(k.requests) : "—"} icon={Users} sub={`${fmtPct(k.cacheHitRate * 100)} cache hit`} />
+        <StatTile
+          label="Requests"
+          value={k.requests ? fmtCompact(k.requests) : "—"}
+          icon={Users}
+          sub={`${fmtPct(k.cacheHitRate * 100)} cache hit`}
+        />
       </div>
 
       {/* trend + model mix */}
@@ -88,7 +83,12 @@ export function TeamsView() {
           <SpendAreaChart data={daily} keys={["Spend"]} colorFor={() => "var(--series-1)"} />
         </SectionCard>
         <SectionCard title="Model mix" subtitle="This team's models">
-          <MixDonut data={models} colorFor={(key) => modelColor(key, dataset.models)} centerLabel="Total" centerValue={fmtCurrency(k.spend)} />
+          <MixDonut
+            data={models}
+            colorFor={(key) => modelColor(key, dataset.models)}
+            centerLabel="Total"
+            centerValue={fmtCurrency(k.spend)}
+          />
         </SectionCard>
       </div>
 
@@ -103,7 +103,11 @@ export function TeamsView() {
                   style={{
                     width: `${Math.min(100, budget.util * 100)}%`,
                     backgroundColor:
-                      budget.status === "over" ? "var(--status-critical)" : budget.status === "watch" ? "var(--status-warning)" : "var(--status-good)",
+                      budget.status === "over"
+                        ? "var(--status-critical)"
+                        : budget.status === "watch"
+                          ? "var(--status-warning)"
+                          : "var(--status-good)",
                   }}
                 />
               </div>

@@ -23,17 +23,30 @@ export function isGatewayUrl(url: string): boolean {
 }
 
 function b64url(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 async function sha256(msg: string): Promise<string> {
   return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(msg))));
 }
 async function hmac(key: string, msg: string): Promise<string> {
-  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const k = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
   return b64url(new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg))));
 }
 
-interface Session { id: string; key: string; expiresAt: number }
+interface Session {
+  id: string;
+  key: string;
+  expiresAt: number;
+}
 let session: Session | null = null;
 let inflight: Promise<void> | null = null;
 

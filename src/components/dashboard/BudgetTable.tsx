@@ -47,7 +47,9 @@ export function BudgetTable({ rows }: { rows: TeamBudget[] }) {
                 <td className="py-2.5 pr-4">
                   <div className="flex items-center gap-2">
                     <MiniBarMeter value={r.util} tone={tone.bar} />
-                    <span className="tnum w-11 shrink-0 text-right text-xs text-foreground">{fmtPct(r.util * 100, 0)}</span>
+                    <span className="tnum w-11 shrink-0 text-right text-xs text-foreground">
+                      {fmtPct(r.util * 100, 0)}
+                    </span>
                   </div>
                 </td>
                 <td className="py-2.5">

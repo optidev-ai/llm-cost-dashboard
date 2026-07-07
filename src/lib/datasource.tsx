@@ -4,13 +4,13 @@
  * export) will implement the same `Dataset` contract, so nothing downstream
  * changes when we add them.
  */
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { getDemoDataset } from "@/data/seed";
 import { fetchLiveUsage, getProxyUrl } from "./live-source";
-import type { Dataset, DataMode, DateRange } from "./types";
+import type { DataMode, Dataset, DateRange } from "./types";
 
 function shift(iso: string, days: number): string {
-  const d = new Date(iso + "T00:00:00");
+  const d = new Date(`${iso}T00:00:00`);
   d.setDate(d.getDate() - days);
   return d.toISOString().slice(0, 10);
 }
@@ -21,7 +21,7 @@ export function buildRanges(ds: Dataset): DateRange[] {
     { from: shift(to, 6), to, label: "7D" },
     { from: shift(to, 29), to, label: "30D" },
     { from: ds.startDate, to, label: "90D" },
-    { from: to.slice(0, 7) + "-01", to, label: "MTD" },
+    { from: `${to.slice(0, 7)}-01`, to, label: "MTD" },
   ];
 }
 

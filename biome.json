@@ -1,8 +1,6 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.2.4/schema.json",
-  "organizeImports": {
-    "enabled": true
-  },
+  "$schema": "https://biomejs.dev/schemas/2.3.8/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
     "rules": {
@@ -25,14 +23,22 @@
   },
   "javascript": {
     "formatter": {
-      "quoteStyle": "single",
+      "quoteStyle": "double",
       "jsxQuoteStyle": "double",
-      "trailingComma": "es5",
-      "semicolons": "asNeeded"
+      "trailingCommas": "all",
+      "semicolons": "always"
     }
   },
   "files": {
-    "include": ["src/**/*.{ts,tsx,js,jsx}"],
-    "ignore": ["node_modules", "dist", ".cache", "*.config.js", "*.config.ts"]
+    "includes": [
+      "**/src/**/*.{ts,tsx,js,jsx}",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/.cache",
+      "!**/*.config.js",
+      "!**/*.config.ts",
+      "!**/src/components/ui/**",
+      "!**/src/hooks/use-toast.ts"
+    ]
   }
 }

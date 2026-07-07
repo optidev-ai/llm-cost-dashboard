@@ -1,17 +1,11 @@
-import { useMemo, useState } from "react";
 import { AlertTriangle, Download } from "lucide-react";
-import { useDashboard } from "@/lib/datasource";
-import { anomalies, budgetAlerts, rowsInRange } from "@/lib/analytics";
-import { fmtCompact, fmtCurrency, fmtDayShort, fmtPct } from "@/lib/format";
+import { useMemo, useState } from "react";
 import { CapsLabel, SectionCard, StatusDot } from "@/components/dashboard/primitives";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { anomalies, budgetAlerts, rowsInRange } from "@/lib/analytics";
+import { useDashboard } from "@/lib/datasource";
+import { fmtCompact, fmtCurrency, fmtDayShort, fmtPct } from "@/lib/format";
 
 const ROW_CAP = 100;
 
@@ -29,14 +23,26 @@ export function AuditView() {
 
   const filtered = useMemo(() => {
     return rows
-      .filter((r) => (teamFilter === "all" || r.teamId === teamFilter) && (modelFilter === "all" || r.modelId === modelFilter))
+      .filter(
+        (r) =>
+          (teamFilter === "all" || r.teamId === teamFilter) && (modelFilter === "all" || r.modelId === modelFilter),
+      )
       .sort((a, b) => (a.date === b.date ? b.cost - a.cost : b.date.localeCompare(a.date)));
   }, [rows, teamFilter, modelFilter]);
 
   function exportCsv() {
     const header = ["date", "team", "model", "requests", "input_tokens", "output_tokens", "cached_tokens", "cost_usd"];
     const lines = filtered.map((r) =>
-      [r.date, teamName.get(r.teamId) ?? r.teamId, modelName.get(r.modelId) ?? r.modelId, r.requests, r.inputTokens, r.outputTokens, r.cachedTokens, r.cost.toFixed(4)]
+      [
+        r.date,
+        teamName.get(r.teamId) ?? r.teamId,
+        modelName.get(r.modelId) ?? r.modelId,
+        r.requests,
+        r.inputTokens,
+        r.outputTokens,
+        r.cachedTokens,
+        r.cost.toFixed(4),
+      ]
         .map((v) => (typeof v === "string" && v.includes(",") ? `"${v}"` : v))
         .join(","),
     );
@@ -69,7 +75,12 @@ export function AuditView() {
                     {a.name}
                   </span>
                   <span className="tnum text-muted-foreground">
-                    {fmtPct(a.util * 100, 0)} of budget · <span style={{ color: a.level === "critical" ? "var(--status-critical)" : "var(--status-warning)" }}>{a.level === "critical" ? "over" : "at risk"}</span>
+                    {fmtPct(a.util * 100, 0)} of budget ·{" "}
+                    <span
+                      style={{ color: a.level === "critical" ? "var(--status-critical)" : "var(--status-warning)" }}
+                    >
+                      {a.level === "critical" ? "over" : "at risk"}
+                    </span>
                   </span>
                 </li>
               ))}
@@ -117,7 +128,9 @@ export function AuditView() {
               <SelectContent>
                 <SelectItem value="all">All teams</SelectItem>
                 {dataset.teams.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -128,7 +141,9 @@ export function AuditView() {
               <SelectContent>
                 <SelectItem value="all">All models</SelectItem>
                 {dataset.models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -143,24 +158,43 @@ export function AuditView() {
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b border-border [&>th]:px-5 [&>th]:py-2.5 [&>th]:text-left">
-                <th><CapsLabel>Date</CapsLabel></th>
-                <th><CapsLabel>Team</CapsLabel></th>
-                <th><CapsLabel>Model</CapsLabel></th>
-                <th><CapsLabel className="text-right">Requests</CapsLabel></th>
-                <th><CapsLabel className="text-right">Tokens</CapsLabel></th>
-                <th><CapsLabel className="text-right">Cost</CapsLabel></th>
+                <th>
+                  <CapsLabel>Date</CapsLabel>
+                </th>
+                <th>
+                  <CapsLabel>Team</CapsLabel>
+                </th>
+                <th>
+                  <CapsLabel>Model</CapsLabel>
+                </th>
+                <th>
+                  <CapsLabel className="text-right">Requests</CapsLabel>
+                </th>
+                <th>
+                  <CapsLabel className="text-right">Tokens</CapsLabel>
+                </th>
+                <th>
+                  <CapsLabel className="text-right">Cost</CapsLabel>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(0, ROW_CAP).map((r, i) => (
-                <tr key={i} className="border-b border-border/50 transition-colors hover:bg-accent/40 [&>td]:px-5 [&>td]:py-2">
+              {filtered.slice(0, ROW_CAP).map((r) => (
+                <tr
+                  key={`${r.date}-${r.teamId}-${r.modelId}`}
+                  className="border-b border-border/50 transition-colors hover:bg-accent/40 [&>td]:px-5 [&>td]:py-2"
+                >
                   <td className="tnum whitespace-nowrap text-muted-foreground">{fmtDayShort(r.date)}</td>
                   <td className="text-foreground">{teamName.get(r.teamId) ?? r.teamId}</td>
                   <td>
-                    <span className="rounded-md bg-secondary px-1.5 py-0.5 text-xs text-foreground">{modelName.get(r.modelId) ?? r.modelId}</span>
+                    <span className="rounded-md bg-secondary px-1.5 py-0.5 text-xs text-foreground">
+                      {modelName.get(r.modelId) ?? r.modelId}
+                    </span>
                   </td>
                   <td className="tnum text-right text-muted-foreground">{r.requests ? fmtCompact(r.requests) : "—"}</td>
-                  <td className="tnum text-right text-muted-foreground">{fmtCompact(r.inputTokens + r.outputTokens)}</td>
+                  <td className="tnum text-right text-muted-foreground">
+                    {fmtCompact(r.inputTokens + r.outputTokens)}
+                  </td>
                   <td className="tnum text-right text-foreground">{fmtCurrency(r.cost)}</td>
                 </tr>
               ))}

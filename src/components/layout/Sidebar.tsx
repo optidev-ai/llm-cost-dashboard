@@ -1,6 +1,6 @@
-import { Cpu, LayoutDashboard, ScrollText, Users, type LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Cpu, LayoutDashboard, type LucideIcon, ScrollText, Users } from "lucide-react";
 import type { PersonaView } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface NavItem {
   id: PersonaView;
@@ -19,7 +19,16 @@ const NAV: NavItem[] = [
 function LogoMark() {
   return (
     <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/30">
-      <svg viewBox="0 0 24 24" className="h-4 w-4 text-primary" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+      <svg
+        viewBox="0 0 24 24"
+        className="h-4 w-4 text-primary"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
         <path d="M3 3v16a2 2 0 0 0 2 2h16" />
         <path d="M7 14l3.5-4 3 3L21 6" />
       </svg>
@@ -46,6 +55,7 @@ export function Sidebar({ active, onNavigate }: { active: PersonaView; onNavigat
           return (
             <button
               key={item.id}
+              type="button"
               onClick={() => onNavigate(item.id)}
               className={cn(
                 "group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors",
@@ -53,9 +63,17 @@ export function Sidebar({ active, onNavigate }: { active: PersonaView; onNavigat
               )}
             >
               {on && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary" />}
-              <Icon className={cn("h-4 w-4 shrink-0", on ? "text-primary" : "text-muted-foreground")} strokeWidth={1.9} />
+              <Icon
+                className={cn("h-4 w-4 shrink-0", on ? "text-primary" : "text-muted-foreground")}
+                strokeWidth={1.9}
+              />
               <span className="min-w-0">
-                <span className={cn("block text-sm font-medium", on ? "text-sidebar-foreground" : "text-sidebar-foreground/85")}>
+                <span
+                  className={cn(
+                    "block text-sm font-medium",
+                    on ? "text-sidebar-foreground" : "text-sidebar-foreground/85",
+                  )}
+                >
                   {item.label}
                 </span>
                 <span className="block truncate text-[11px] text-muted-foreground">{item.hint}</span>
@@ -81,7 +99,16 @@ export function Sidebar({ active, onNavigate }: { active: PersonaView; onNavigat
           </p>
           <span className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-primary">
             Open in OptiDev
-            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              viewBox="0 0 24 24"
+              className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
               <path d="M7 17L17 7M7 7h10v10" />
             </svg>
           </span>

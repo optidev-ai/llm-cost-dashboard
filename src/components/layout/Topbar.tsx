@@ -1,9 +1,9 @@
-import { useState } from "react";
 import { KeyRound } from "lucide-react";
-import { useDashboard } from "@/lib/datasource";
-import { cn } from "@/lib/utils";
-import type { PersonaView } from "@/lib/types";
+import { useState } from "react";
 import { ConnectKeyDialog } from "@/components/dashboard/ConnectKeyDialog";
+import { useDashboard } from "@/lib/datasource";
+import type { PersonaView } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const TITLES: Record<PersonaView, { title: string; sub: string }> = {
   executive: { title: "Executive Overview", sub: "Spend, allocation & budget across the org" },
@@ -46,10 +46,13 @@ export function Topbar({ view }: { view: PersonaView }) {
           {ranges.map((r) => (
             <button
               key={r.label}
+              type="button"
               onClick={() => setRange(r)}
               className={cn(
                 "rounded-md px-2.5 py-1 text-xs font-medium tnum transition-colors",
-                r.label === range.label ? "bg-secondary text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                r.label === range.label
+                  ? "bg-secondary text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               {r.label}
@@ -58,6 +61,7 @@ export function Topbar({ view }: { view: PersonaView }) {
         </div>
 
         <button
+          type="button"
           onClick={() => setConnectOpen(true)}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
         >

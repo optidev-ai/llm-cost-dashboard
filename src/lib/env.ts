@@ -18,7 +18,7 @@ declare global {
 export function getEnv(key: string): string | undefined {
   // Try Vite's build-time env first (works in dev)
   const viteValue = import.meta.env[key];
-  if (viteValue !== undefined && viteValue !== '') {
+  if (viteValue !== undefined && viteValue !== "") {
     return viteValue;
   }
 

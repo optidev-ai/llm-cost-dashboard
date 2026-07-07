@@ -26,7 +26,7 @@ export function fmtCompact(n: number): string {
 
 /** Signed percentage: +12.4% · −3.1% · 0% */
 export function fmtPctDelta(n: number): string {
-  if (!isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : n < 0 ? "−" : "";
   return `${sign}${Math.abs(n).toFixed(1)}%`;
 }
@@ -38,7 +38,7 @@ export function fmtPct(n: number, digits = 1): string {
 
 /** "Jun 12" */
 export function fmtDayShort(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
+  const d = new Date(`${iso}T00:00:00`);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 

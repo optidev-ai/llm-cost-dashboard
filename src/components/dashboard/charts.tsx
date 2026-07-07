@@ -10,9 +10,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { NamedSpend } from "@/lib/analytics";
 import { fmtCurrency, fmtCurrencyFull, fmtDayShort, fmtPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { NamedSpend } from "@/lib/analytics";
 
 const AXIS = "var(--viz-ink-muted)";
 const GRID = "var(--viz-grid)";
@@ -212,10 +212,21 @@ export function RankedBars({
   );
 }
 
-export function MiniBarMeter({ value, tone = "var(--series-1)", className }: { value: number; tone?: string; className?: string }) {
+export function MiniBarMeter({
+  value,
+  tone = "var(--series-1)",
+  className,
+}: {
+  value: number;
+  tone?: string;
+  className?: string;
+}) {
   return (
     <span className={cn("block h-1.5 w-full overflow-hidden rounded-full bg-muted", className)}>
-      <span className="block h-full rounded-full" style={{ width: `${Math.min(100, Math.max(2, value * 100))}%`, backgroundColor: tone }} />
+      <span
+        className="block h-full rounded-full"
+        style={{ width: `${Math.min(100, Math.max(2, value * 100))}%`, backgroundColor: tone }}
+      />
     </span>
   );
 }

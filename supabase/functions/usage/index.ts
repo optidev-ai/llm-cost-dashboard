@@ -132,6 +132,54 @@ async function fetchOpenAI(adminKey: string, days: number): Promise<RawRow[]> {
   return rows;
 }
 
+// ── actual billed cost (Cost API — the invoice truth) ───────────────────────────
+// The usage fetchers above compute cost = tokens × list price. The Cost API
+// returns what the org was ACTUALLY billed (committed-use / batch discounts,
+// negotiated rates). Reconciling the two is the finance-grade differentiator.
+// Best-effort: a failure here must never break the usage response.
+async function fetchAnthropicBilled(adminKey: string, days: number): Promise<number> {
+  const end = new Date();
+  const start = new Date(end.getTime() - days * DAY);
+  let total = 0;
+  let page: string | undefined;
+  for (let guard = 0; guard < 20; guard++) {
+    const qs = new URLSearchParams({ starting_at: start.toISOString(), ending_at: end.toISOString(), bucket_width: "1d", limit: "31" });
+    if (page) qs.set("page", page);
+    const res = await fetch(`https://api.anthropic.com/v1/organizations/cost_report?${qs}`, {
+      headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
+    });
+    if (!res.ok) throw new Error(`Anthropic cost API ${res.status}`);
+    const json = await res.json();
+    for (const bucket of json.data ?? []) {
+      for (const r of bucket.results ?? []) total += Number(r.amount ?? 0);
+    }
+    if (!json.has_more || !json.next_page) break;
+    page = json.next_page;
+  }
+  return total;
+}
+
+async function fetchOpenAIBilled(adminKey: string, days: number): Promise<number> {
+  const startTime = Math.floor((Date.now() - days * DAY) / 1000);
+  let total = 0;
+  let page: string | undefined;
+  for (let guard = 0; guard < 20; guard++) {
+    const qs = new URLSearchParams({ start_time: String(startTime), bucket_width: "1d", limit: "31" });
+    if (page) qs.set("page", page);
+    const res = await fetch(`https://api.openai.com/v1/organization/costs?${qs}`, {
+      headers: { Authorization: `Bearer ${adminKey}` },
+    });
+    if (!res.ok) throw new Error(`OpenAI cost API ${res.status}`);
+    const json = await res.json();
+    for (const bucket of json.data ?? []) {
+      for (const r of bucket.results ?? []) total += Number(r.amount?.value ?? 0);
+    }
+    if (!json.has_more || !json.next_page) break;
+    page = json.next_page;
+  }
+  return total;
+}
+
 // ── normalize → Dataset ──────────────────────────────────────────────────────
 function buildDataset(provider: Provider, rows: RawRow[], days: number) {
   const providerName = provider === "anthropic" ? "Anthropic" : "OpenAI";
@@ -273,7 +321,28 @@ Deno.serve(async (req: Request) => {
     if (rows.length === 0) {
       return json({ error: "No usage found for this org in the last 13 months. The key is valid, but the org has no recorded activity in that window — check the provider's own usage dashboard." }, 404);
     }
-    return json(buildDataset(cred.provider, rows, effectiveDays), 200);
+    const dataset = buildDataset(cred.provider, rows, effectiveDays);
+    // Attach invoice reconciliation from the Cost API (best-effort — the usage
+    // response stands on its own if the Cost API is unavailable or errors).
+    try {
+      const estimatedCost = rows.reduce((s, r) => s + r.cost, 0);
+      const billedCost = cred.provider === "anthropic"
+        ? await fetchAnthropicBilled(cred.adminKey, effectiveDays)
+        : await fetchOpenAIBilled(cred.adminKey, effectiveDays);
+      if (billedCost > 0) {
+        (dataset as Record<string, unknown>).billing = {
+          billedCost,
+          estimatedCost,
+          source: "cost-api",
+          from: dataset.startDate,
+          to: dataset.endDate,
+          byProvider: [{ provider: cred.provider, billed: billedCost, estimated: estimatedCost }],
+        };
+      }
+    } catch (_) {
+      // Cost API optional — omit billing rather than fail the whole fetch.
+    }
+    return json(dataset, 200);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     return json({ error: msg }, msg === "cloud_not_active" ? 409 : 502);

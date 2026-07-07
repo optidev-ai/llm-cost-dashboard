@@ -1,22 +1,11 @@
-import { useState } from "react";
 import { KeyRound, Loader2, Lock, ShieldCheck } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { CONNECTABLE_PROVIDERS, connectKey, fetchLiveUsage, ProxyNotConfiguredError } from "@/lib/live-source";
 import type { Dataset, ProviderId } from "@/lib/types";
-import {
-  CONNECTABLE_PROVIDERS,
-  ProxyNotConfiguredError,
-  connectKey,
-  fetchLiveUsage,
-} from "@/lib/live-source";
+import { cn } from "@/lib/utils";
 
 type Phase = "form" | "submitting" | "needs-backend" | "error";
 
@@ -73,9 +62,7 @@ export function ConnectKeyDialog({
             <KeyRound className="h-4 w-4 text-primary" strokeWidth={2} />
             Connect your data
           </DialogTitle>
-          <DialogDescription>
-            Swap the demo for your organization's real LLM spend.
-          </DialogDescription>
+          <DialogDescription>Swap the demo for your organization's real LLM spend.</DialogDescription>
         </DialogHeader>
 
         {(phase === "form" || phase === "submitting" || phase === "error") && (
@@ -87,6 +74,7 @@ export function ConnectKeyDialog({
                 {CONNECTABLE_PROVIDERS.map((p) => (
                   <button
                     key={p.id}
+                    type="button"
                     onClick={() => setProvider(p.id)}
                     className={cn(
                       "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
@@ -119,13 +107,16 @@ export function ConnectKeyDialog({
             <div className="flex items-start gap-2 rounded-lg border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-status-good" strokeWidth={1.75} />
               <span>
-                Your admin key is read <span className="text-foreground">server-side</span> by an edge function
-                and never touches the browser. It pulls the provider Usage &amp; Cost API and returns aggregated spend.
+                Your admin key is read <span className="text-foreground">server-side</span> by an edge function and
+                never touches the browser. It pulls the provider Usage &amp; Cost API and returns aggregated spend.
               </span>
             </div>
 
             {phase === "error" && (
-              <p className="rounded-md bg-status-critical/10 px-3 py-2 text-xs" style={{ color: "var(--status-critical)" }}>
+              <p
+                className="rounded-md bg-status-critical/10 px-3 py-2 text-xs"
+                style={{ color: "var(--status-critical)" }}
+              >
                 {errorMsg}
               </p>
             )}
@@ -159,20 +150,24 @@ export function ConnectKeyDialog({
               <p className="text-sm font-medium text-foreground">Real data isn't wired up yet</p>
               <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                 Reading your org's usage needs the{" "}
-                <code className="rounded bg-secondary px-1 py-0.5 text-foreground">usage</code> function deployed — it holds
-                your admin key server-side and calls the provider API (a browser can't: CORS + key exposure). Set it up one of two ways:
+                <code className="rounded bg-secondary px-1 py-0.5 text-foreground">usage</code> function deployed — it
+                holds your admin key server-side and calls the provider API (a browser can't: CORS + key exposure). Set
+                it up one of two ways:
               </p>
             </div>
             <div className="space-y-2.5 text-xs leading-relaxed text-muted-foreground">
               <div className="rounded-lg border border-border bg-secondary/40 p-3">
                 <p className="mb-1 font-medium text-foreground">On OptiDev</p>
-                Ask the agent to <span className="text-foreground">activate OptiDev Cloud and deploy the usage function</span>,
-                then reopen this dialog and connect your key.
+                Ask the agent to{" "}
+                <span className="text-foreground">activate OptiDev Cloud and deploy the usage function</span>, then
+                reopen this dialog and connect your key.
               </div>
               <div className="rounded-lg border border-border bg-secondary/40 p-3">
                 <p className="mb-1 font-medium text-foreground">Self-hosted</p>
-                Deploy <code className="rounded bg-secondary px-1 py-0.5 text-foreground">supabase/functions/usage</code> and set{" "}
-                <code className="rounded bg-secondary px-1 py-0.5 text-foreground">VITE_USAGE_PROXY_URL</code> to its URL, then reconnect.
+                Deploy{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-foreground">supabase/functions/usage</code> and
+                set <code className="rounded bg-secondary px-1 py-0.5 text-foreground">VITE_USAGE_PROXY_URL</code> to
+                its URL, then reconnect.
               </div>
             </div>
             <div className="flex justify-end">

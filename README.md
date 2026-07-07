@@ -14,8 +14,9 @@ Observability tools (Langfuse, Helicone) give you traces. Gateways (LiteLLM, Clo
 
 ## Highlights
 
-- 📊 **Executive view** — total spend, forecast-to-month-end, budget-used %, cost allocation by department, budget-vs-actual per team, biggest week-over-week movers, unit economics.
-- 🏷️ **Cost allocation & chargeback** — showback ↔ chargeback toggle; attribute every dollar to a team and department.
+- 📊 **Executive view** — total spend, forecast-to-month-end, budget-used %, cost allocation by team, budget-vs-actual per team, biggest week-over-week movers, unit economics.
+- 🧾 **Invoice reconciliation** — the finance-grade differentiator. Reconciles our list-price estimate against your **actual billed cost** (provider Cost API), surfaces the effective discount, and lets you enter your real invoice total for the last-mile check (taxes / minimums / credits). The number finance can defend against the bill.
+- 🏷️ **Real chargeback** — not a relabel. Showback shows each team's directly-attributed spend with the shared/platform pool left explicit; chargeback distributes that pool across budget-owned teams by **usage / equal / headcount**, so every dollar lands on a team and totals tie out. Exports a per-team chargeback statement.
 - 🎯 **Budget vs. actual** — forecast each team to month-end against its monthly budget, with on-track / at-risk / over status.
 - 💡 **Zero setup** — opens on realistic seeded data (12 teams · 6 models · 3 providers · 90 days). Nothing to configure to explore it.
 - 🎨 **Polished, dark-first cockpit UI** — built on React 19 + Tailwind + shadcn/ui + Recharts, with a colorblind-safe chart palette.
@@ -63,7 +64,9 @@ src/
 - [x] Team view — per-team detail, spend vs budget, model mix, trend
 - [x] Audit view — request log + filters + CSV export, budget alerts, spend-spike anomaly detection
 - [x] Mode ② — provider Usage/Cost API via edge function (`supabase/functions/usage`)
-- [ ] Mode ③ — LiteLLM / Cloudflare AI Gateway ingestion (unlocks latency, errors, true per-team attribution)
+- [x] Invoice reconciliation — list-price estimate vs. actual billed cost (Cost API) + invoice last-mile
+- [x] Real chargeback — shared-pool distribution (usage / equal / headcount) + per-team statement export
+- [ ] Mode ③ — LiteLLM / Cloudflare AI Gateway ingestion (unlocks latency, errors, true per-team & per-feature attribution)
 
 ## License
 

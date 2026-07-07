@@ -93,8 +93,8 @@ async function callProxy(payload: Record<string, unknown>): Promise<Record<strin
   // Supabase Edge Functions expect the project's publishable/anon key to invoke.
   const key = getEnv("VITE_SUPABASE_PUBLISHABLE_KEY") ?? getEnv("VITE_SUPABASE_ANON_KEY");
   if (key) {
-    headers["authorization"] = `Bearer ${key}`;
-    headers["apikey"] = key;
+    headers.authorization = `Bearer ${key}`;
+    headers.apikey = key;
   }
   // signedFetch HMAC-signs through the OptiDev gateway (adds x-session-id/x-ts/x-sig
   // on top of these headers); plain fetch for non-gateway URLs. Body is a fixed

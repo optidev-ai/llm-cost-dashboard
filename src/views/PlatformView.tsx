@@ -1,31 +1,34 @@
-import { useMemo } from "react";
 import { Activity, Gauge, Layers, Zap } from "lucide-react";
-import { useDashboard } from "@/lib/datasource";
-import {
-  budgetByTeam,
-  kpis,
-  latency,
-  rowsInRange,
-  spendByModel,
-  spendByProvider,
-} from "@/lib/analytics";
-import { modelColor, providerColor } from "@/lib/palette";
-import { fmtCompact, fmtCurrency, fmtMs, fmtPct } from "@/lib/format";
-import { CapsLabel, SectionCard, StatTile, StatusDot } from "@/components/dashboard/primitives";
+import { useMemo } from "react";
 import { MiniBarMeter, MixDonut } from "@/components/dashboard/charts";
+import { CapsLabel, SectionCard, StatTile, StatusDot } from "@/components/dashboard/primitives";
+import { budgetByTeam, capabilities, kpis, latency, rowsInRange, spendByModel, spendByProvider } from "@/lib/analytics";
+import { useDashboard } from "@/lib/datasource";
+import { fmtCompact, fmtCurrency, fmtMs, fmtPct } from "@/lib/format";
+import { modelColor, providerColor } from "@/lib/palette";
 
 /** Premium models (expensive output) — usage of these is what governance watches. */
 const PREMIUM_OUT_PRICE = 40; // USD / 1M output tokens
 
-function ReliabilityPanel({ noPerf, p50, p95, errorRate }: { noPerf: boolean; p50: number; p95: number; errorRate: number }) {
+function ReliabilityPanel({
+  noPerf,
+  p50,
+  p95,
+  errorRate,
+}: {
+  noPerf: boolean;
+  p50: number;
+  p95: number;
+  errorRate: number;
+}) {
   if (noPerf) {
     return (
       <div className="flex h-full flex-col justify-center gap-2 rounded-lg border border-dashed border-border p-4 text-center">
         <Activity className="mx-auto h-5 w-5 text-muted-foreground" strokeWidth={1.5} />
         <p className="text-sm font-medium text-foreground">Latency & errors need a gateway</p>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          The provider billing API doesn't expose latency or error rates. Route traffic through a
-          gateway (LiteLLM / Cloudflare AI Gateway) to light these up — that's Mode ③.
+          The provider billing API doesn't expose latency or error rates. Route traffic through a gateway (LiteLLM /
+          Cloudflare AI Gateway) to light these up — that's Mode ③.
         </p>
       </div>
     );
@@ -47,7 +50,10 @@ function ReliabilityPanel({ noPerf, p50, p95, errorRate }: { noPerf: boolean; p5
       ))}
       <div className="flex items-baseline justify-between border-t border-border/60 pt-3">
         <CapsLabel>Error rate</CapsLabel>
-        <span className="tnum text-sm font-semibold" style={{ color: errorRate > 0.02 ? "var(--status-critical)" : "var(--foreground)" }}>
+        <span
+          className="tnum text-sm font-semibold"
+          style={{ color: errorRate > 0.02 ? "var(--status-critical)" : "var(--foreground)" }}
+        >
           {fmtPct(errorRate * 100, 2)}
         </span>
       </div>
@@ -64,8 +70,9 @@ export function PlatformView() {
   const providers = useMemo(() => spendByProvider(dataset, rows), [dataset, rows]);
   const budgets = useMemo(() => budgetByTeam(dataset), [dataset]);
 
-  const noPerf = lat.p95 === 0; // live billing-API data has no latency
-  const noReq = k.requests === 0;
+  const caps = useMemo(() => capabilities(dataset), [dataset]);
+  const noPerf = !caps.hasLatency; // live billing-API data has no latency
+  const noReq = !caps.hasRequests;
 
   // premium-model governance
   const premium = useMemo(() => {
@@ -84,39 +91,82 @@ export function PlatformView() {
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="animate-slide-up" style={stagger(0)}>
-          <StatTile label={`Requests · ${range.label}`} value={noReq ? "—" : fmtCompact(k.requests)} icon={Activity} sub={noReq ? "not reported by this source" : `${fmtCompact(k.tokens)} tokens`} />
+          <StatTile
+            label={`Requests · ${range.label}`}
+            value={noReq ? "—" : fmtCompact(k.requests)}
+            icon={Activity}
+            sub={noReq ? "not reported by this source" : `${fmtCompact(k.tokens)} tokens`}
+          />
         </div>
         <div className="animate-slide-up" style={stagger(1)}>
-          <StatTile label="Cost / 1k requests" value={noReq ? "—" : fmtCurrency(k.costPerRequest * 1000)} icon={Zap} sub={noReq ? "needs request counts" : "blended across models"} />
+          <StatTile
+            label="Cost / 1k requests"
+            value={noReq ? "—" : fmtCurrency(k.costPerRequest * 1000)}
+            icon={Zap}
+            sub={noReq ? "needs request counts" : "blended across models"}
+          />
         </div>
         <div className="animate-slide-up" style={stagger(2)}>
-          <StatTile label="Cache-hit rate" value={fmtPct(k.cacheHitRate * 100)} icon={Layers} accent sub="of input tokens served from cache" />
+          <StatTile
+            label="Cache-hit rate"
+            value={fmtPct(k.cacheHitRate * 100)}
+            icon={Layers}
+            accent
+            sub="of input tokens served from cache"
+          />
         </div>
         <div className="animate-slide-up" style={stagger(3)}>
-          <StatTile label="p95 latency" value={noPerf ? "—" : fmtMs(lat.p95)} icon={Gauge} sub={noPerf ? "needs a gateway" : `p50 ${fmtMs(lat.p50)}`} />
+          <StatTile
+            label="p95 latency"
+            value={noPerf ? "—" : fmtMs(lat.p95)}
+            icon={Gauge}
+            sub={noPerf ? "needs a gateway" : `p50 ${fmtMs(lat.p50)}`}
+          />
         </div>
       </div>
 
       {/* mix + reliability */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <SectionCard title="Spend by model" subtitle={`${range.label} · ${dataset.models.length} models`}>
-          <MixDonut data={models} colorFor={(key) => modelColor(key, dataset.models)} centerLabel="Total" centerValue={fmtCurrency(k.spend)} />
+          <MixDonut
+            data={models}
+            colorFor={(key) => modelColor(key, dataset.models)}
+            centerLabel="Total"
+            centerValue={fmtCurrency(k.spend)}
+          />
         </SectionCard>
         <SectionCard title="Reliability" subtitle="Latency & error rate">
           <ReliabilityPanel noPerf={noPerf} p50={lat.p50} p95={lat.p95} errorRate={k.errorRate} />
         </SectionCard>
-        <SectionCard title="Spend by provider" subtitle={`${providers.length} provider${providers.length === 1 ? "" : "s"}`}>
-          <MixDonut data={providers} colorFor={(key) => providerColor(key as never)} centerLabel="Providers" centerValue={`${providers.length}`} />
+        <SectionCard
+          title="Spend by provider"
+          subtitle={`${providers.length} provider${providers.length === 1 ? "" : "s"}`}
+        >
+          <MixDonut
+            data={providers}
+            colorFor={(key) => providerColor(key as never)}
+            centerLabel="Providers"
+            centerValue={`${providers.length}`}
+          />
         </SectionCard>
       </div>
 
       {/* headroom + governance */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <SectionCard className="lg:col-span-2" title="Budget headroom" subtitle="Remaining budget by team (forecast vs. monthly budget)">
+        <SectionCard
+          className="lg:col-span-2"
+          title="Budget headroom"
+          subtitle="Remaining budget by team (forecast vs. monthly budget)"
+        >
           <ul className="space-y-3">
             {budgets.slice(0, 8).map((b) => {
               const headroom = Math.max(0, 1 - b.util);
-              const tone = b.status === "over" ? "var(--status-critical)" : b.status === "watch" ? "var(--status-warning)" : "var(--status-good)";
+              const tone =
+                b.status === "over"
+                  ? "var(--status-critical)"
+                  : b.status === "watch"
+                    ? "var(--status-warning)"
+                    : "var(--status-good)";
               const dot = b.status === "over" ? "critical" : b.status === "watch" ? "warning" : "good";
               return (
                 <li key={b.teamId} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1">
@@ -140,11 +190,18 @@ export function PlatformView() {
               <div>
                 <div className="flex items-baseline justify-between">
                   <CapsLabel>Premium share of spend</CapsLabel>
-                  <span className="tnum text-2xl font-semibold" style={{ color: premium.share > 0.4 ? "var(--status-warning)" : "var(--foreground)" }}>
+                  <span
+                    className="tnum text-2xl font-semibold"
+                    style={{ color: premium.share > 0.4 ? "var(--status-warning)" : "var(--foreground)" }}
+                  >
                     {fmtPct(premium.share * 100, 0)}
                   </span>
                 </div>
-                <MiniBarMeter value={premium.share} tone={premium.share > 0.4 ? "var(--status-warning)" : "var(--series-5)"} className="mt-2" />
+                <MiniBarMeter
+                  value={premium.share}
+                  tone={premium.share > 0.4 ? "var(--status-warning)" : "var(--series-5)"}
+                  className="mt-2"
+                />
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {fmtCurrency(premium.spend)} on {premium.names.join(", ")}. High premium share is a routing-savings

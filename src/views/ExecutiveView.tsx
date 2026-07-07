@@ -1,28 +1,33 @@
+import { Boxes, CircleDollarSign, Download, TrendingUp, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Boxes, CircleDollarSign, TrendingUp, Wallet } from "lucide-react";
-import { useDashboard } from "@/lib/datasource";
+import { BudgetTable } from "@/components/dashboard/BudgetTable";
+import { MixDonut, RankedBars, SpendAreaChart } from "@/components/dashboard/charts";
+import { CapsLabel, DeltaBadge, SectionCard, StatTile } from "@/components/dashboard/primitives";
+import { ReconcileCard } from "@/components/dashboard/ReconcileCard";
+import { Button } from "@/components/ui/button";
+import type { AllocationMethod } from "@/lib/analytics";
 import {
   budgetByTeam,
+  capabilities,
+  chargeback,
   dailyByDept,
   departments,
   kpis,
   monthFinance,
   rowsInRange,
-  spendByDept,
   spendByModel,
   spendByProvider,
   topMovers,
 } from "@/lib/analytics";
-import type { DateRange } from "@/lib/types";
-import { OTHER_COLOR, SERIES, modelColor, providerColor } from "@/lib/palette";
+import { useDashboard } from "@/lib/datasource";
 import { fmtCurrency, fmtCurrencyFull, fmtPct } from "@/lib/format";
-import { CapsLabel, DeltaBadge, SectionCard, StatTile } from "@/components/dashboard/primitives";
-import { MixDonut, RankedBars, SpendAreaChart } from "@/components/dashboard/charts";
-import { BudgetTable } from "@/components/dashboard/BudgetTable";
+import { modelColor, OTHER_COLOR, providerColor, SERIES } from "@/lib/palette";
+import type { DateRange } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 function shiftRange(range: DateRange): DateRange {
-  const from = new Date(range.from + "T00:00:00");
-  const to = new Date(range.to + "T00:00:00");
+  const from = new Date(`${range.from}T00:00:00`);
+  const to = new Date(`${range.to}T00:00:00`);
   const len = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
   const pTo = new Date(from);
   pTo.setDate(from.getDate() - 1);
@@ -44,27 +49,67 @@ function DeptLegend({ depts, colorFor }: { depts: string[]; colorFor: (d: string
   );
 }
 
-function AllocationCard() {
+const ALLOCATION_METHODS: { value: AllocationMethod; label: string }[] = [
+  { value: "usage", label: "Usage" },
+  { value: "equal", label: "Equal" },
+  { value: "headcount", label: "Headcount" },
+];
+
+/**
+ * Real chargeback — not a relabel. Showback shows each team's directly-attributed
+ * spend with the shared/platform pool left explicit; chargeback distributes that
+ * pool across budget-owned teams by the chosen driver, so every dollar lands on a
+ * team and the totals tie out. Exports a per-team chargeback statement.
+ */
+function ChargebackCard() {
   const { dataset, range } = useDashboard();
   const [mode, setMode] = useState<"showback" | "chargeback">("showback");
+  const [method, setMethod] = useState<AllocationMethod>("usage");
+
   const rows = useMemo(() => rowsInRange(dataset, range), [dataset, range]);
-  const byDept = useMemo(() => spendByDept(dataset, rows), [dataset, rows]);
-  const total = byDept.reduce((s, d) => s + d.cost, 0);
+  const cb = useMemo(() => chargeback(dataset, rows, method), [dataset, rows, method]);
+
+  const isCharge = mode === "chargeback";
+  const grand = cb.directTotal + cb.sharedPool;
+  const bars = cb.rows.slice(0, 8).map((r) => ({
+    key: r.teamId,
+    name: r.name,
+    cost: isCharge ? r.total : r.direct,
+    share: r.share,
+  }));
+
+  function exportStatement(): void {
+    const header = ["team", "department", "direct_usd", "allocated_shared_usd", "total_usd"];
+    const lines = cb.rows.map((r) =>
+      [r.name, r.department, r.direct.toFixed(2), r.allocated.toFixed(2), r.total.toFixed(2)]
+        .map((v) => (typeof v === "string" && v.includes(",") ? `"${v}"` : v))
+        .join(","),
+    );
+    const meta = `# Chargeback statement · ${range.label} · shared pool ${fmtCurrencyFull(cb.sharedPool)} allocated by ${cb.effectiveMethod}`;
+    const blob = new Blob([[meta, header.join(","), ...lines].join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chargeback-${range.label.toLowerCase()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <SectionCard
       title="Cost allocation"
-      subtitle={mode === "showback" ? "Visibility by department (no transfer)" : "Billed back to each department"}
+      subtitle={isCharge ? `Shared pool billed back by ${cb.effectiveMethod}` : "Directly-attributed spend by team"}
       action={
         <div className="flex items-center rounded-lg border border-border bg-background p-0.5 text-xs">
           {(["showback", "chargeback"] as const).map((m) => (
             <button
               key={m}
+              type="button"
               onClick={() => setMode(m)}
-              className={
-                "rounded-md px-2 py-1 font-medium capitalize transition-colors " +
-                (m === mode ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")
-              }
+              className={cn(
+                "rounded-md px-2 py-1 font-medium capitalize transition-colors",
+                m === mode ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
             >
               {m}
             </button>
@@ -72,10 +117,45 @@ function AllocationCard() {
         </div>
       }
     >
-      <RankedBars data={byDept} color={mode === "chargeback" ? "var(--primary)" : "var(--series-1)"} />
-      <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-3 text-sm">
-        <span className="text-muted-foreground">{mode === "chargeback" ? "Total charged back" : "Total attributed"}</span>
-        <span className="tnum font-medium text-foreground">{fmtCurrencyFull(total)}</span>
+      {isCharge && (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Allocate shared by</span>
+          <div className="flex items-center rounded-lg border border-border bg-background p-0.5 text-xs">
+            {ALLOCATION_METHODS.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setMethod(m.value)}
+                className={cn(
+                  "rounded-md px-2 py-1 font-medium transition-colors",
+                  m.value === method ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <RankedBars data={bars} color={isCharge ? "var(--primary)" : "var(--series-1)"} />
+
+      <div className="mt-4 space-y-2 border-t border-border/60 pt-3">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">{isCharge ? "Total charged back" : "Directly attributed"}</span>
+          <span className="tnum font-medium text-foreground">{fmtCurrencyFull(isCharge ? grand : cb.directTotal)}</span>
+        </div>
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">
+            {isCharge ? `Shared pool distributed (${cb.effectiveMethod})` : "Shared / unallocated pool"}
+          </span>
+          <span className="tnum text-muted-foreground">{fmtCurrencyFull(cb.sharedPool)}</span>
+        </div>
+        <div className="pt-1">
+          <Button variant="outline" size="sm" onClick={exportStatement} className="h-8 w-full gap-1.5">
+            <Download className="h-3.5 w-3.5" /> Export chargeback statement
+          </Button>
+        </div>
       </div>
     </SectionCard>
   );
@@ -99,6 +179,7 @@ export function ExecutiveView() {
   const providers = useMemo(() => spendByProvider(dataset, rows), [dataset, rows]);
   const budgets = useMemo(() => budgetByTeam(dataset), [dataset]);
   const movers = useMemo(() => topMovers(dataset, 5), [dataset]);
+  const caps = useMemo(() => capabilities(dataset), [dataset]);
 
   const spendDelta = prevSpend ? (k.spend - prevSpend) / prevSpend : 0;
   const orgUtil = dataset.orgMonthlyBudget ? mf.forecast / dataset.orgMonthlyBudget : 0;
@@ -149,6 +230,11 @@ export function ExecutiveView() {
         </div>
       </div>
 
+      {/* invoice reconciliation — list price vs. actual bill */}
+      <div className="animate-slide-up" style={stagger(4)}>
+        <ReconcileCard />
+      </div>
+
       {/* trend + model mix */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <SectionCard
@@ -160,7 +246,12 @@ export function ExecutiveView() {
           <SpendAreaChart data={dailyDept} keys={depts} colorFor={colorForDept} />
         </SectionCard>
         <SectionCard title="Spend by model" subtitle={`${range.label} · ${dataset.models.length} models`}>
-          <MixDonut data={models} colorFor={(key) => modelColor(key, dataset.models)} centerLabel="Total" centerValue={fmtCurrency(k.spend)} />
+          <MixDonut
+            data={models}
+            colorFor={(key) => modelColor(key, dataset.models)}
+            centerLabel="Total"
+            centerValue={fmtCurrency(k.spend)}
+          />
         </SectionCard>
       </div>
 
@@ -173,7 +264,7 @@ export function ExecutiveView() {
         >
           <BudgetTable rows={budgets} />
         </SectionCard>
-        <AllocationCard />
+        <ChargebackCard />
       </div>
 
       {/* movers + provider mix + efficiency */}
@@ -216,16 +307,26 @@ export function ExecutiveView() {
             <div>
               <div className="flex items-baseline justify-between">
                 <CapsLabel>Cost / 1k requests</CapsLabel>
-                <span className="tnum text-lg font-semibold text-foreground">{fmtCurrency(k.costPerRequest * 1000)}</span>
+                <span className="tnum text-lg font-semibold text-foreground">
+                  {caps.hasRequests ? fmtCurrency(k.costPerRequest * 1000) : "—"}
+                </span>
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">{fmtCurrency(k.spend)} over {k.requests.toLocaleString()} requests</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {caps.hasRequests
+                  ? `${fmtCurrency(k.spend)} over ${k.requests.toLocaleString()} requests`
+                  : "request counts need a gateway (Mode ③)"}
+              </p>
             </div>
             <div>
               <div className="flex items-baseline justify-between">
                 <CapsLabel>Error rate</CapsLabel>
-                <span className="tnum text-lg font-semibold text-foreground">{fmtPct(k.errorRate * 100, 2)}</span>
+                <span className="tnum text-lg font-semibold text-foreground">
+                  {caps.hasErrors ? fmtPct(k.errorRate * 100, 2) : "—"}
+                </span>
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">failed requests across all providers</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {caps.hasErrors ? "failed requests across all providers" : "error rates need a gateway (Mode ③)"}
+              </p>
             </div>
           </dl>
         </SectionCard>
