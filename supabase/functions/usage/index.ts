@@ -197,6 +197,12 @@ async function fetchOpenAI(adminKey: string, days: number): Promise<RawRow[]> {
 // returns what the org was ACTUALLY billed (committed-use / batch discounts,
 // negotiated rates). Reconciling the two is the finance-grade differentiator.
 // Best-effort: a failure here must never break the usage response.
+// Anthropic's cost_report `amount` is in CENTS (minor units), verified against a
+// real org: plain uncached-input billed 568.77 → $5.69, matching a token×price
+// estimate of $5.84. So divide by 100 to get dollars. (OpenAI's costs endpoint
+// returns dollars in `amount.value` — no scaling there.)
+const ANTHROPIC_COST_UNITS_PER_DOLLAR = 100;
+
 async function fetchAnthropicBilledWindow(adminKey: string, w: TimeWindow): Promise<number> {
   const qs = new URLSearchParams({ starting_at: w.start.toISOString(), ending_at: w.end.toISOString(), bucket_width: "1d", limit: "31" });
   const res = await fetch(`https://api.anthropic.com/v1/organizations/cost_report?${qs}`, {
@@ -204,11 +210,11 @@ async function fetchAnthropicBilledWindow(adminKey: string, w: TimeWindow): Prom
   });
   if (!res.ok) throw new Error(`Anthropic cost API ${res.status}`);
   const json = await res.json();
-  let total = 0;
+  let cents = 0;
   for (const bucket of json.data ?? []) {
-    for (const r of bucket.results ?? []) total += Number(r.amount ?? 0);
+    for (const r of bucket.results ?? []) cents += Number(r.amount ?? 0);
   }
-  return total;
+  return cents / ANTHROPIC_COST_UNITS_PER_DOLLAR;
 }
 
 async function fetchAnthropicBilled(adminKey: string, days: number): Promise<number> {
@@ -229,6 +235,7 @@ async function fetchOpenAIBilledWindow(adminKey: string, w: TimeWindow): Promise
   });
   if (!res.ok) throw new Error(`OpenAI cost API ${res.status}`);
   const json = await res.json();
+  // OpenAI returns dollars in `amount.value` (USD) — no scaling needed.
   let total = 0;
   for (const bucket of json.data ?? []) {
     for (const r of bucket.results ?? []) total += Number(r.amount?.value ?? 0);
