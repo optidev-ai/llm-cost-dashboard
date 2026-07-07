@@ -2,7 +2,7 @@ import { Boxes, CircleDollarSign, Download, TrendingUp, Wallet } from "lucide-re
 import { useMemo, useState } from "react";
 import { BudgetTable } from "@/components/dashboard/BudgetTable";
 import { MixDonut, RankedBars, SpendAreaChart } from "@/components/dashboard/charts";
-import { CapsLabel, DeltaBadge, SectionCard, StatTile } from "@/components/dashboard/primitives";
+import { CapsLabel, DeltaBadge, SectionCard, SectionHeader, StatTile } from "@/components/dashboard/primitives";
 import { ReconcileCard } from "@/components/dashboard/ReconcileCard";
 import { Button } from "@/components/ui/button";
 import type { AllocationMethod } from "@/lib/analytics";
@@ -187,150 +187,162 @@ export function ExecutiveView() {
   const stagger = (i: number) => ({ animationDelay: `${i * 60}ms` });
 
   return (
-    <div className="space-y-4 p-6">
-      {/* KPI row */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="animate-slide-up" style={stagger(0)}>
-          <StatTile
-            label={`Spend · ${range.label}`}
-            value={fmtCurrency(k.spend)}
-            delta={spendDelta}
-            deltaGoodDir="down"
-            icon={CircleDollarSign}
-            sub={`vs ${fmtCurrency(prevSpend)} prior period`}
-          />
+    <div className="space-y-8 px-6 py-6 lg:px-8">
+      {/* Overview */}
+      <section>
+        <SectionHeader title="Overview" hint={`${range.label} · vs prior period`} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="animate-slide-up" style={stagger(0)}>
+            <StatTile
+              label={`Spend · ${range.label}`}
+              value={fmtCurrency(k.spend)}
+              delta={spendDelta}
+              deltaGoodDir="down"
+              icon={CircleDollarSign}
+              sub={`vs ${fmtCurrency(prevSpend)} prior period`}
+            />
+          </div>
+          <div className="animate-slide-up" style={stagger(1)}>
+            <StatTile
+              label="Forecast · month-end"
+              value={fmtCurrency(mf.forecast)}
+              delta={mf.momGrowth}
+              deltaGoodDir="down"
+              icon={TrendingUp}
+              accent
+              sub={`${fmtCurrency(mf.mtd)} MTD · ${fmtPct(mf.monthElapsed * 100, 0)} of month elapsed`}
+            />
+          </div>
+          <div className="animate-slide-up" style={stagger(2)}>
+            <StatTile
+              label="Budget used · forecast"
+              value={fmtPct(orgUtil * 100, 0)}
+              icon={Wallet}
+              deltaGoodDir="down"
+              sub={`${fmtCurrency(mf.forecast)} of ${fmtCurrency(dataset.orgMonthlyBudget)}/mo org budget`}
+            />
+          </div>
+          <div className="animate-slide-up" style={stagger(3)}>
+            <StatTile
+              label="Active teams"
+              value={`${k.activeTeams}`}
+              icon={Boxes}
+              sub={`${dataset.models.length} models · ${dataset.providers.length} providers`}
+            />
+          </div>
         </div>
-        <div className="animate-slide-up" style={stagger(1)}>
-          <StatTile
-            label="Forecast · month-end"
-            value={fmtCurrency(mf.forecast)}
-            delta={mf.momGrowth}
-            deltaGoodDir="down"
-            icon={TrendingUp}
-            accent
-            sub={`${fmtCurrency(mf.mtd)} MTD · ${fmtPct(mf.monthElapsed * 100, 0)} of month elapsed`}
-          />
-        </div>
-        <div className="animate-slide-up" style={stagger(2)}>
-          <StatTile
-            label="Budget used · forecast"
-            value={fmtPct(orgUtil * 100, 0)}
-            icon={Wallet}
-            deltaGoodDir="down"
-            sub={`${fmtCurrency(mf.forecast)} of ${fmtCurrency(dataset.orgMonthlyBudget)}/mo org budget`}
-          />
-        </div>
-        <div className="animate-slide-up" style={stagger(3)}>
-          <StatTile
-            label="Active teams"
-            value={`${k.activeTeams}`}
-            icon={Boxes}
-            sub={`${dataset.models.length} models · ${dataset.providers.length} providers`}
-          />
-        </div>
-      </div>
+      </section>
 
-      {/* invoice reconciliation — list price vs. actual bill */}
-      <div className="animate-slide-up" style={stagger(4)}>
+      {/* Reconciliation — its own band (self-titled) */}
+      <section className="animate-slide-up" style={stagger(4)}>
         <ReconcileCard />
-      </div>
+      </section>
 
-      {/* trend + model mix */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <SectionCard
-          className="lg:col-span-2"
-          title="Spend over time"
-          subtitle="Daily cost, stacked by department"
-          action={<DeptLegend depts={depts} colorFor={colorForDept} />}
-        >
-          <SpendAreaChart data={dailyDept} keys={depts} colorFor={colorForDept} />
-        </SectionCard>
-        <SectionCard title="Spend by model" subtitle={`${range.label} · ${dataset.models.length} models`}>
-          <MixDonut
-            data={models}
-            colorFor={(key) => modelColor(key, dataset.models)}
-            centerLabel="Total"
-            centerValue={fmtCurrency(k.spend)}
-          />
-        </SectionCard>
-      </div>
+      {/* Trends */}
+      <section>
+        <SectionHeader title="Trends" hint={range.label} />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <SectionCard
+            className="lg:col-span-2"
+            title="Spend over time"
+            subtitle="Daily cost, stacked by department"
+            action={<DeptLegend depts={depts} colorFor={colorForDept} />}
+          >
+            <SpendAreaChart data={dailyDept} keys={depts} colorFor={colorForDept} />
+          </SectionCard>
+          <SectionCard title="Spend by model" subtitle={`${range.label} · ${dataset.models.length} models`}>
+            <MixDonut
+              data={models}
+              colorFor={(key) => modelColor(key, dataset.models)}
+              centerLabel="Total"
+              centerValue={fmtCurrency(k.spend)}
+            />
+          </SectionCard>
+        </div>
+      </section>
 
-      {/* budget table + allocation */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <SectionCard
-          className="lg:col-span-2"
-          title="Budget vs. actual"
-          subtitle="Forecast-to-month-end against each team's monthly budget"
-        >
-          <BudgetTable rows={budgets} />
-        </SectionCard>
-        <ChargebackCard />
-      </div>
+      {/* Budgets & allocation */}
+      <section>
+        <SectionHeader title="Budgets & allocation" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <SectionCard
+            className="lg:col-span-2"
+            title="Budget vs. actual"
+            subtitle="Forecast-to-month-end against each team's monthly budget"
+          >
+            <BudgetTable rows={budgets} />
+          </SectionCard>
+          <ChargebackCard />
+        </div>
+      </section>
 
-      {/* movers + provider mix + efficiency */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <SectionCard title="Biggest movers" subtitle="Week-over-week spend change">
-          <ul className="space-y-3">
-            {movers.map((m) => (
-              <li key={m.teamId} className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-foreground">{m.name}</div>
-                  <div className="tnum text-xs text-muted-foreground">
-                    {fmtCurrency(m.recent)} <span className="opacity-60">from {fmtCurrency(m.prior)}</span>
+      {/* Signals */}
+      <section>
+        <SectionHeader title="Signals" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <SectionCard title="Biggest movers" subtitle="Week-over-week spend change">
+            <ul className="space-y-3">
+              {movers.map((m) => (
+                <li key={m.teamId} className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-foreground">{m.name}</div>
+                    <div className="tnum text-xs text-muted-foreground">
+                      {fmtCurrency(m.recent)} <span className="opacity-60">from {fmtCurrency(m.prior)}</span>
+                    </div>
                   </div>
+                  <DeltaBadge value={m.delta} goodDirection="down" />
+                </li>
+              ))}
+            </ul>
+          </SectionCard>
+
+          <SectionCard title="Spend by provider" subtitle={`${range.label}`}>
+            <MixDonut
+              data={providers}
+              colorFor={(key) => providerColor(key as never)}
+              centerLabel="Providers"
+              centerValue={`${providers.length}`}
+              height={180}
+            />
+          </SectionCard>
+
+          <SectionCard title="Efficiency" subtitle="Unit economics across the range">
+            <dl className="space-y-4">
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <CapsLabel>Cache hit rate</CapsLabel>
+                  <span className="tnum text-lg font-semibold text-foreground">{fmtPct(k.cacheHitRate * 100)}</span>
                 </div>
-                <DeltaBadge value={m.delta} goodDirection="down" />
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-
-        <SectionCard title="Spend by provider" subtitle={`${range.label}`}>
-          <MixDonut
-            data={providers}
-            colorFor={(key) => providerColor(key as never)}
-            centerLabel="Providers"
-            centerValue={`${providers.length}`}
-            height={180}
-          />
-        </SectionCard>
-
-        <SectionCard title="Efficiency" subtitle="Unit economics across the range">
-          <dl className="space-y-4">
-            <div>
-              <div className="flex items-baseline justify-between">
-                <CapsLabel>Cache hit rate</CapsLabel>
-                <span className="tnum text-lg font-semibold text-foreground">{fmtPct(k.cacheHitRate * 100)}</span>
+                <p className="mt-0.5 text-xs text-muted-foreground">of input tokens served from cache</p>
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">of input tokens served from cache</p>
-            </div>
-            <div>
-              <div className="flex items-baseline justify-between">
-                <CapsLabel>Cost / 1k requests</CapsLabel>
-                <span className="tnum text-lg font-semibold text-foreground">
-                  {caps.hasRequests ? fmtCurrency(k.costPerRequest * 1000) : "—"}
-                </span>
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <CapsLabel>Cost / 1k requests</CapsLabel>
+                  <span className="tnum text-lg font-semibold text-foreground">
+                    {caps.hasRequests ? fmtCurrency(k.costPerRequest * 1000) : "—"}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {caps.hasRequests
+                    ? `${fmtCurrency(k.spend)} over ${k.requests.toLocaleString()} requests`
+                    : "request counts need a gateway (Mode ③)"}
+                </p>
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {caps.hasRequests
-                  ? `${fmtCurrency(k.spend)} over ${k.requests.toLocaleString()} requests`
-                  : "request counts need a gateway (Mode ③)"}
-              </p>
-            </div>
-            <div>
-              <div className="flex items-baseline justify-between">
-                <CapsLabel>Error rate</CapsLabel>
-                <span className="tnum text-lg font-semibold text-foreground">
-                  {caps.hasErrors ? fmtPct(k.errorRate * 100, 2) : "—"}
-                </span>
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <CapsLabel>Error rate</CapsLabel>
+                  <span className="tnum text-lg font-semibold text-foreground">
+                    {caps.hasErrors ? fmtPct(k.errorRate * 100, 2) : "—"}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {caps.hasErrors ? "failed requests across all providers" : "error rates need a gateway (Mode ③)"}
+                </p>
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {caps.hasErrors ? "failed requests across all providers" : "error rates need a gateway (Mode ③)"}
-              </p>
-            </div>
-          </dl>
-        </SectionCard>
-      </div>
+            </dl>
+          </SectionCard>
+        </div>
+      </section>
     </div>
   );
 }

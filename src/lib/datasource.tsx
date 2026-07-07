@@ -4,7 +4,7 @@
  * export) will implement the same `Dataset` contract, so nothing downstream
  * changes when we add them.
  */
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { getDemoDataset } from "@/data/seed";
 import { clearLiveCache, readLiveCache, writeLiveCache } from "./live-cache";
 import { fetchLiveUsage, getProxyUrl, NoKeyError } from "./live-source";
@@ -32,12 +32,14 @@ interface DashboardCtx {
   ranges: DateRange[];
   range: DateRange;
   setRange: (r: DateRange) => void;
-  /** Swap the demo dataset for live data (Mode ②/③). */
-  connectLive: (ds: Dataset, mode?: DataMode) => void;
-  /** True while a live fetch is in flight (initial load or a manual refresh). */
+  /** True while a live fetch is in flight (initial load, refresh, or first sync). */
   isRefreshing: boolean;
-  /** Force a fresh pull from the provider APIs (bypasses server cache). */
-  refresh: () => void;
+  /** True while pulling the FIRST live data after a connect (drives the sync UI). */
+  isSyncing: boolean;
+  /** Pull / revalidate live data. `force` bypasses the server cache. */
+  reload: (force?: boolean) => void;
+  /** Called by the provider manager after a connect/disconnect changes the set. */
+  onConnectionsChanged: () => void;
 }
 
 const Ctx = createContext<DashboardCtx | null>(null);
@@ -50,53 +52,58 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [dataset, setDataset] = useState<Dataset>(cached ?? demo);
   const [mode, setMode] = useState<DataMode>(cached ? "key" : "demo");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [justConnected, setJustConnected] = useState(false);
   const [rangeLabel, setRangeLabel] = useState("30D"); // default 30D
+  // Whether live data is currently shown — gates progressive loading at call time
+  // (avoids a stale closure over the mount-time cache value).
+  const hasLive = useRef(Boolean(cached));
 
   const ranges = useMemo(() => buildRanges(dataset), [dataset]);
   const range = ranges.find((r) => r.label === rangeLabel) ?? ranges[1];
 
-  // Fetch live data through the proxy and reconcile UI + cache. Shared by the
-  // on-open auto-load and the manual refresh. `force` bypasses the server cache.
+  // Fetch live data through the proxy and reconcile UI + cache.
   const loadLive = useCallback(
     async (force: boolean, signal?: { cancelled: boolean }) => {
       if (!getProxyUrl()) return;
       setIsRefreshing(true);
+      const applied = (ds: Dataset) => {
+        setDataset(ds);
+        setMode("key");
+        writeLiveCache(ds);
+        hasLive.current = true;
+        setJustConnected(false);
+      };
       try {
-        // Progressive first paint only when cold (no cached live data shown yet):
-        // a quick 30-day window fills the default 30D view in one request, then the
-        // full 90-day history backfills. With a warm cache or a manual refresh we
-        // already show full data, so skip straight to 90d to avoid a visible shrink.
-        if (!cached && !force) {
+        // Progressive first paint only when we don't already show live data: a quick
+        // 30-day window fills the default 30D view in one request, then the full
+        // 90-day history backfills. A refresh (force) skips it to avoid a shrink.
+        if (!hasLive.current && !force) {
           const quick = await fetchLiveUsage({ days: 30 });
           if (signal?.cancelled) return;
-          setDataset(quick);
-          setMode("key");
-          writeLiveCache(quick);
+          applied(quick);
         }
         const full = await fetchLiveUsage({ days: 90, refresh: force });
         if (signal?.cancelled) return;
-        setDataset(full);
-        setMode("key");
-        writeLiveCache(full);
+        applied(full);
       } catch (e: unknown) {
         if (signal?.cancelled) return;
-        // Key removed server-side → drop the stale cache and fall back to demo.
+        // No key connected → fall back to demo and drop any stale cache.
         if (e instanceof NoKeyError) {
           clearLiveCache();
+          hasLive.current = false;
           setDataset(demo);
           setMode("demo");
+          setJustConnected(false);
         }
         // Transient / provider error → keep whatever we're showing (cache or demo).
       } finally {
         if (!signal?.cancelled) setIsRefreshing(false);
       }
     },
-    [demo, cached],
+    [demo],
   );
 
-  // Auto-load on open: if a proxy is wired and a key was connected earlier, pull
-  // (or revalidate) real data. With a warm client cache this is a background
-  // stale-while-revalidate; with none it upgrades demo → live once it resolves.
+  // Auto-load on open: revalidate (warm cache → background) or upgrade demo → live.
   useEffect(() => {
     const signal = { cancelled: false };
     loadLive(false, signal);
@@ -112,28 +119,19 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       ranges,
       range,
       isRefreshing,
+      isSyncing: isRefreshing && mode !== "key" && justConnected,
       setRange: (r: DateRange) => setRangeLabel(r.label),
-      connectLive: (ds: Dataset, m: DataMode = "key") => {
-        setDataset(ds);
-        setMode(m);
-        if (m !== "key") return;
-        writeLiveCache(ds);
-        // The dialog fetches a quick 30-day window for a fast first paint;
-        // backfill the full 90-day history in the background.
-        setIsRefreshing(true);
-        fetchLiveUsage({ days: 90 })
-          .then((full) => {
-            setDataset(full);
-            writeLiveCache(full);
-          })
-          .catch(() => {
-            /* keep the quick window on any backfill error */
-          })
-          .finally(() => setIsRefreshing(false));
+      reload: (force = false) => loadLive(force),
+      onConnectionsChanged: () => {
+        // The connected set changed — drop the (now-wrong) cache and re-pull,
+        // showing the first-sync state while the first window loads.
+        clearLiveCache();
+        hasLive.current = false;
+        setJustConnected(true);
+        loadLive(false);
       },
-      refresh: () => loadLive(true),
     }),
-    [dataset, mode, ranges, range, isRefreshing, loadLive],
+    [dataset, mode, ranges, range, isRefreshing, justConnected, loadLive],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

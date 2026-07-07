@@ -1,4 +1,5 @@
 import { Cpu, LayoutDashboard, type LucideIcon, ScrollText, Users } from "lucide-react";
+import { Wordmark } from "@/components/brand";
 import { isInsideOptiDev } from "@/lib/env";
 import type { PersonaView } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -17,38 +18,15 @@ const NAV: NavItem[] = [
   { id: "audit", label: "Audit", hint: "Logs & alerts", icon: ScrollText },
 ];
 
-function LogoMark() {
-  return (
-    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/30">
-      <svg
-        viewBox="0 0 24 24"
-        className="h-4 w-4 text-primary"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.25"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M3 3v16a2 2 0 0 0 2 2h16" />
-        <path d="M7 14l3.5-4 3 3L21 6" />
-      </svg>
-    </div>
-  );
-}
-
 export function Sidebar({ active, onNavigate }: { active: PersonaView; onNavigate: (v: PersonaView) => void }) {
   // The "build this on OptiDev" CTA is lead-gen for the public demo — hide it
   // once the user is already inside an OptiDev workspace.
   const showOptiDevCta = !isInsideOptiDev();
   return (
     <aside className="flex w-[248px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
-      <div className="flex items-center gap-2.5 px-5 py-4">
-        <LogoMark />
-        <div className="leading-tight">
-          <div className="text-sm font-semibold tracking-tight text-sidebar-foreground">LLM Ledger</div>
-          <div className="text-[11px] text-muted-foreground">Cost & Usage Governance</div>
-        </div>
+      <div className="px-5 py-[18px]">
+        <Wordmark className="text-[17px]" />
+        <div className="mt-1 text-[11px] tracking-wide text-muted-foreground">Cost &amp; Usage Governance</div>
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-2">

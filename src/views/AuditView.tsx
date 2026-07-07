@@ -56,7 +56,7 @@ export function AuditView() {
   }
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-6 px-6 py-6 lg:px-8">
       {/* alerts */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard

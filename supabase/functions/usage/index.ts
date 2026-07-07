@@ -44,10 +44,12 @@ function priceFor(provider: string, model: string): Price {
 }
 
 interface RawRow {
-  date: string; teamId: string; teamName: string; modelId: string;
+  date: string; provider: Provider; teamId: string; teamName: string; modelId: string;
   inputTokens: number; outputTokens: number; cachedTokens: number;
   requests: number; errors: number; cost: number;
 }
+
+const PROVIDER_NAME: Record<Provider, string> = { anthropic: "Anthropic", openai: "OpenAI" };
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -132,7 +134,8 @@ async function fetchAnthropicWindow(adminKey: string, w: TimeWindow): Promise<Ra
       const cost = ((uncached * p.in + cacheRead * p.in * 0.1 + cacheCreate * p.in * 1.25 + output * p.out) / 1e6) * batch;
       const wsId = r.workspace_id ?? "default";
       rows.push({
-        date, teamId: wsId, teamName: r.workspace_id ? `Workspace ${String(wsId).slice(-6)}` : "Default workspace",
+        date, provider: "anthropic", teamId: `anthropic:${wsId}`,
+        teamName: r.workspace_id ? `Workspace ${String(wsId).slice(-6)}` : "Default workspace",
         modelId: model, inputTokens: uncached + cacheRead + cacheCreate, outputTokens: output,
         cachedTokens: cacheRead, requests: 0, errors: 0, cost,
       });
@@ -174,7 +177,8 @@ async function fetchOpenAIWindow(adminKey: string, w: TimeWindow): Promise<RawRo
       const cost = (((input - cached) * p.in + cached * p.in * 0.5 + output * p.out) / 1e6) * batch;
       const projId = r.project_id ?? "default";
       rows.push({
-        date, teamId: projId, teamName: r.project_id ? `Project ${String(projId).slice(-6)}` : "Default project",
+        date, provider: "openai", teamId: `openai:${projId}`,
+        teamName: r.project_id ? `Project ${String(projId).slice(-6)}` : "Default project",
         modelId: model, inputTokens: input, outputTokens: output, cachedTokens: cached,
         requests: r.num_model_requests ?? 0, errors: 0, cost,
       });
@@ -237,34 +241,49 @@ async function fetchOpenAIBilled(adminKey: string, days: number): Promise<number
   return parts.reduce((s, v) => s + v, 0);
 }
 
-// ── normalize → Dataset ──────────────────────────────────────────────────────
-function buildDataset(provider: Provider, rows: RawRow[], days: number) {
-  const providerName = provider === "anthropic" ? "Anthropic" : "OpenAI";
-  const dates = rows.map((r) => r.date).filter(Boolean).sort();
-  const modelIds = [...new Set(rows.map((r) => r.modelId))];
-  const models = modelIds.map((id) => { const p = priceFor(provider, id); return { id, name: id, provider, priceIn: p.in, priceOut: p.out }; });
-  const teamMeta = new Map<string, string>();
-  rows.forEach((r) => teamMeta.set(r.teamId, r.teamName));
+// ── normalize → Dataset (merges rows from every connected provider) ────────────
+function buildDataset(rows: RawRow[], days: number) {
+  const providerIds = [...new Set(rows.map((r) => r.provider))];
+  const providers = providerIds.map((id) => ({ id, name: PROVIDER_NAME[id] }));
+
+  // model → its provider (first seen), so a merged set prices each model correctly
+  const modelProvider = new Map<string, Provider>();
+  for (const r of rows) if (!modelProvider.has(r.modelId)) modelProvider.set(r.modelId, r.provider);
+  const models = [...modelProvider.entries()].map(([id, prov]) => {
+    const p = priceFor(prov, id);
+    return { id, name: id, provider: prov, priceIn: p.in, priceOut: p.out };
+  });
+
+  // teams = each provider's workspaces/projects; department = provider name, so the
+  // "by department" views become an honest per-provider consolidation.
+  const teamMeta = new Map<string, { name: string; provider: Provider }>();
+  rows.forEach((r) => {
+    if (!teamMeta.has(r.teamId)) teamMeta.set(r.teamId, { name: r.teamName, provider: r.provider });
+  });
   const cut30 = isoDay(new Date(Date.now() - 30 * DAY));
   const spend30 = new Map<string, number>();
-  rows.forEach((r) => { if (r.date >= cut30) spend30.set(r.teamId, (spend30.get(r.teamId) ?? 0) + r.cost); });
-  const teams = [...teamMeta.entries()].map(([id, name]) => ({
-    id, name, department: name, monthlyBudget: Math.max(50, Math.round(((spend30.get(id) ?? 0) / 0.8) / 10) * 10),
+  rows.forEach((r) => {
+    if (r.date >= cut30) spend30.set(r.teamId, (spend30.get(r.teamId) ?? 0) + r.cost);
+  });
+  const teams = [...teamMeta.entries()].map(([id, meta]) => ({
+    id, name: meta.name, department: PROVIDER_NAME[meta.provider],
+    monthlyBudget: Math.max(50, Math.round(((spend30.get(id) ?? 0) / 0.8) / 10) * 10),
   }));
+
+  const dates = rows.map((r) => r.date).filter(Boolean).sort();
   return {
-    org: `${providerName} org`,
+    org: providers.length === 1 ? `${providers[0].name} org` : "Connected providers",
     generatedAt: new Date().toISOString(),
     startDate: dates[0] ?? isoDay(new Date(Date.now() - days * DAY)),
     endDate: dates[dates.length - 1] ?? isoDay(new Date()),
     orgMonthlyBudget: Math.round(teams.reduce((s, t) => s + t.monthlyBudget, 0) / 100) * 100,
-    providers: [{ id: provider, name: providerName }],
-    models, teams,
+    providers, models, teams,
     usage: rows.map((r) => ({
       date: r.date, teamId: r.teamId, modelId: r.modelId, requests: r.requests,
       inputTokens: r.inputTokens, outputTokens: r.outputTokens, cachedTokens: r.cachedTokens,
       errors: r.errors, cost: r.cost, latencyP50: 0, latencyP95: 0,
     })),
-    _note: "Live data from the provider billing API. Latency/error/request-count metrics require a gateway (Mode ③); cost is token×price with cached/batch adjustment.",
+    _note: "Live data from provider billing APIs. Latency/error/request-count metrics require a gateway (Mode ③); cost is token×price with cached/batch adjustment.",
   };
 }
 
@@ -293,6 +312,9 @@ function dbUrl(): string | undefined {
   return Deno.env.get("SUPABASE_DB_URL");
 }
 
+// One credential row PER provider (id = provider), so OpenAI + Anthropic coexist
+// and the dashboard can consolidate both. (The old single 'default' row is
+// migrated on the next connect and ignored by loadCredentials's provider dedupe.)
 async function saveCredential(provider: Provider, adminKey: string): Promise<void> {
   const url = dbUrl();
   if (!url) throw new Error("cloud_not_active");
@@ -307,33 +329,76 @@ async function saveCredential(provider: Provider, adminKey: string): Promise<voi
       updated_at timestamptz not null default now()
     )`;
     await sql`insert into app_usage_credential (id, provider, key_encrypted, key_iv, updated_at)
-      values ('default', ${provider}, ${ct}, ${iv}, now())
+      values (${provider}, ${provider}, ${ct}, ${iv}, now())
       on conflict (id) do update set
         provider = excluded.provider,
         key_encrypted = excluded.key_encrypted,
         key_iv = excluded.key_iv,
         updated_at = now()`;
-    // Invalidate any cached datasets — the key just changed, so cached data may
-    // belong to a different key/org. Best-effort (table may not exist yet).
+    // Drop the legacy single-credential row if it was for this same provider.
+    await sql`delete from app_usage_credential where id = 'default' and provider = ${provider}`.catch(() => {});
+    // The connected set changed → invalidate cached datasets (best-effort).
     await sql`delete from app_usage_cache where true`.catch(() => {});
   } finally {
     await sql.end({ timeout: 5 });
   }
 }
 
-async function loadCredential(): Promise<{ provider: Provider; adminKey: string } | null> {
+async function deleteCredential(provider: Provider): Promise<void> {
   const url = dbUrl();
-  if (!url) return null;
+  if (!url) return;
   const sql = postgres(url, { prepare: false });
   try {
-    const rows = await sql`select provider, key_encrypted, key_iv from app_usage_credential where id = 'default' limit 1`;
-    if (!rows.length) return null;
-    return { provider: rows[0].provider as Provider, adminKey: await decrypt(rows[0].key_encrypted, rows[0].key_iv) };
-  } catch {
-    // table not created yet (no connect has happened) → treat as no key
-    return null;
+    await sql`delete from app_usage_credential where provider = ${provider}`.catch(() => {});
+    await sql`delete from app_usage_cache where true`.catch(() => {});
   } finally {
     await sql.end({ timeout: 5 });
+  }
+}
+
+interface Cred {
+  provider: Provider;
+  adminKey: string;
+}
+
+// All connected credentials, most-recent-per-provider (handles the legacy row).
+async function loadCredentials(): Promise<Cred[]> {
+  const url = dbUrl();
+  if (!url) return [];
+  const sql = postgres(url, { prepare: false });
+  try {
+    const rows = await sql`select provider, key_encrypted, key_iv, updated_at
+      from app_usage_credential order by updated_at desc`;
+    const byProvider = new Map<Provider, Cred>();
+    for (const row of rows) {
+      const provider = row.provider as Provider;
+      if (byProvider.has(provider)) continue; // keep the newest per provider
+      byProvider.set(provider, { provider, adminKey: await decrypt(row.key_encrypted, row.key_iv) });
+    }
+    return [...byProvider.values()];
+  } catch {
+    return []; // table not created yet → no keys
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+// Fast validity check — a lightweight admin call so `connect` can confirm the key
+// works in ~1s and return, without waiting on the slow usage aggregation.
+async function validateKey(provider: Provider, adminKey: string): Promise<boolean> {
+  try {
+    if (provider === "anthropic") {
+      const res = await fetch("https://api.anthropic.com/v1/organizations/workspaces?limit=1", {
+        headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
+      });
+      return res.ok;
+    }
+    const res = await fetch("https://api.openai.com/v1/organization/projects?limit=1", {
+      headers: { Authorization: `Bearer ${adminKey}` },
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 
@@ -343,13 +408,13 @@ async function loadCredential(): Promise<{ provider: Provider; adminKey: string 
 // multi-second provider round-trip into a single fast DB read. `refresh` bypasses it.
 const CACHE_TTL_MIN = 10;
 
-async function loadCachedDataset(provider: Provider, days: number): Promise<unknown | null> {
+async function loadCachedDataset(key: string): Promise<unknown | null> {
   const url = dbUrl();
   if (!url) return null;
   const sql = postgres(url, { prepare: false });
   try {
     const rows = await sql`select dataset from app_usage_cache
-      where id = ${`${provider}:${days}`} and updated_at > now() - (${CACHE_TTL_MIN} * interval '1 minute')
+      where id = ${key} and updated_at > now() - (${CACHE_TTL_MIN} * interval '1 minute')
       limit 1`;
     return rows.length ? rows[0].dataset : null;
   } catch {
@@ -359,7 +424,7 @@ async function loadCachedDataset(provider: Provider, days: number): Promise<unkn
   }
 }
 
-async function saveCachedDataset(provider: Provider, days: number, dataset: unknown): Promise<void> {
+async function saveCachedDataset(key: string, dataset: unknown): Promise<void> {
   const url = dbUrl();
   if (!url) return;
   const sql = postgres(url, { prepare: false });
@@ -370,7 +435,7 @@ async function saveCachedDataset(provider: Provider, days: number, dataset: unkn
       updated_at timestamptz not null default now()
     )`;
     await sql`insert into app_usage_cache (id, dataset, updated_at)
-      values (${`${provider}:${days}`}, ${sql.json(dataset as object)}, now())
+      values (${key}, ${sql.json(dataset as object)}, now())
       on conflict (id) do update set dataset = excluded.dataset, updated_at = now()`;
   } catch {
     // cache write is best-effort — never fail the fetch over it
@@ -399,72 +464,99 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
   const body = await req.json().catch(() => ({}));
-  const action = body.action === "connect" ? "connect" : "fetch";
+  const action = String(body.action ?? "fetch");
+  const asProvider = (v: unknown): Provider => (v === "openai" ? "openai" : "anthropic");
 
   try {
+    // ── connect: store the key + fast validity check (no slow usage fetch here,
+    // so the dialog returns in ~1s; the dashboard does the real pull after). ──
     if (action === "connect") {
-      const provider: Provider = body.provider === "openai" ? "openai" : "anthropic";
+      const provider = asProvider(body.provider);
       const adminKey = String(body.adminKey ?? "").trim();
       if (adminKey.length < 8) return json({ error: "missing adminKey" }, 400);
+      if (!(await validateKey(provider, adminKey))) {
+        return json({ error: `That key was rejected by ${PROVIDER_NAME[provider]}. It needs to be an admin/org key, not a standard project key.` }, 400);
+      }
       await saveCredential(provider, adminKey);
       return json({ ok: true, provider }, 200);
     }
 
+    // ── disconnect: remove one provider's key ──
+    if (action === "disconnect") {
+      await deleteCredential(asProvider(body.provider));
+      const remaining = await loadCredentials();
+      return json({ ok: true, providers: remaining.map((c) => c.provider) }, 200);
+    }
+
+    // ── providers: list what's connected (drives the manager UI) ──
+    if (action === "providers") {
+      const creds = await loadCredentials();
+      return json({ providers: creds.map((c) => c.provider) }, 200);
+    }
+
+    // ── fetch: pull + merge every connected provider ──
     const days = Math.min(Math.max(Number(body.days) || 90, 1), 180);
     const refresh = body.refresh === true;
-    let cred = await loadCredential();
-    if (!cred) {
-      const bodyKey = body.adminKey && String(body.adminKey).trim();
-      if (bodyKey) cred = { provider: body.provider === "openai" ? "openai" : "anthropic", adminKey: bodyKey };
-      else if (Deno.env.get("ANTHROPIC_ADMIN_KEY")) cred = { provider: "anthropic", adminKey: Deno.env.get("ANTHROPIC_ADMIN_KEY")! };
-      else if (Deno.env.get("OPENAI_ADMIN_KEY")) cred = { provider: "openai", adminKey: Deno.env.get("OPENAI_ADMIN_KEY")! };
-    }
-    if (!cred) return json({ needsKey: true }, 200);
 
-    // Fast path: return the recently-cached dataset without touching the (slow)
-    // provider APIs. `refresh: true` forces a fresh pull.
+    let creds = await loadCredentials();
+    if (creds.length === 0) {
+      // Fallbacks: an inline body key, or env secrets (self-hosted).
+      const bodyKey = body.adminKey && String(body.adminKey).trim();
+      if (bodyKey) creds = [{ provider: asProvider(body.provider), adminKey: bodyKey }];
+      else if (Deno.env.get("ANTHROPIC_ADMIN_KEY")) creds = [{ provider: "anthropic", adminKey: Deno.env.get("ANTHROPIC_ADMIN_KEY")! }];
+      else if (Deno.env.get("OPENAI_ADMIN_KEY")) creds = [{ provider: "openai", adminKey: Deno.env.get("OPENAI_ADMIN_KEY")! }];
+    }
+    if (creds.length === 0) return json({ needsKey: true }, 200);
+
+    const cacheKey = `${creds.map((c) => c.provider).sort().join("+")}:${days}`;
     if (!refresh) {
-      const cached = await loadCachedDataset(cred.provider, days);
+      const cached = await loadCachedDataset(cacheKey);
       if (cached) return json(cached, 200);
     }
 
-    const fetcher = cred.provider === "anthropic" ? fetchAnthropic : fetchOpenAI;
-    // Fetch usage and actual billed cost concurrently (they're independent, and
-    // each provider call is slow) — roughly halves the round-trip.
+    // Pull usage + billed cost for every provider concurrently.
+    const pull = async (effectiveDays: number) =>
+      Promise.all(
+        creds.map(async (c) => {
+          const fetcher = c.provider === "anthropic" ? fetchAnthropic : fetchOpenAI;
+          const [rows, billed] = await Promise.all([
+            fetcher(c.adminKey, effectiveDays),
+            fetchBilled(c.provider, c.adminKey, effectiveDays),
+          ]);
+          return { provider: c.provider, rows, billed };
+        }),
+      );
+
     let effectiveDays = days;
-    let [rows, billedCost] = await Promise.all([
-      fetcher(cred.adminKey, effectiveDays),
-      fetchBilled(cred.provider, cred.adminKey, effectiveDays),
-    ]);
-    // Sparse orgs (test / low-usage) can have no activity in the requested window
-    // but real spend further back. Auto-widen once to ~13 months before giving up.
-    // Active orgs hit the first pass and never pay for the wider scan.
-    if (rows.length === 0 && effectiveDays < 400) {
+    let parts = await pull(effectiveDays);
+    // Sparse orgs can have no recent activity but real spend further back — widen
+    // once to ~13 months before giving up (cheap now that fetches are chunked).
+    if (parts.every((p) => p.rows.length === 0) && effectiveDays < 400) {
       effectiveDays = 400;
-      [rows, billedCost] = await Promise.all([
-        fetcher(cred.adminKey, effectiveDays),
-        fetchBilled(cred.provider, cred.adminKey, effectiveDays),
-      ]);
+      parts = await pull(effectiveDays);
     }
-    if (rows.length === 0) {
-      return json({ error: "No usage found for this org in the last 13 months. The key is valid, but the org has no recorded activity in that window — check the provider's own usage dashboard." }, 404);
+    const allRows = parts.flatMap((p) => p.rows);
+    if (allRows.length === 0) {
+      return json({ error: "No usage found for the connected org(s) in the last 13 months. The key(s) are valid, but there's no recorded activity in that window — check the provider's own usage dashboard." }, 404);
     }
-    const dataset = buildDataset(cred.provider, rows, effectiveDays);
-    // Attach invoice reconciliation from the Cost API (best-effort — the usage
-    // response stands on its own if the Cost API was unavailable, billedCost = 0).
-    if (billedCost > 0) {
-      const estimatedCost = rows.reduce((s, r) => s + r.cost, 0);
+
+    const dataset = buildDataset(allRows, effectiveDays);
+    // Invoice reconciliation: only include providers whose Cost API returned a real
+    // figure, so the estimate↔billed comparison stays apples-to-apples.
+    const byProvider = parts
+      .filter((p) => p.billed > 0 && p.rows.length > 0)
+      .map((p) => ({ provider: p.provider, billed: p.billed, estimated: p.rows.reduce((s, r) => s + r.cost, 0) }));
+    if (byProvider.length > 0) {
       (dataset as Record<string, unknown>).billing = {
-        billedCost,
-        estimatedCost,
+        billedCost: byProvider.reduce((s, p) => s + p.billed, 0),
+        estimatedCost: byProvider.reduce((s, p) => s + p.estimated, 0),
         source: "cost-api",
         from: dataset.startDate,
         to: dataset.endDate,
-        byProvider: [{ provider: cred.provider, billed: billedCost, estimated: estimatedCost }],
+        byProvider,
       };
     }
-    // Warm the cache for subsequent loads (best-effort, keyed by requested days).
-    await saveCachedDataset(cred.provider, days, dataset);
+    await saveCachedDataset(cacheKey, dataset);
     return json(dataset, 200);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";

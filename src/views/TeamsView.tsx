@@ -26,7 +26,7 @@ export function TeamsView() {
   const orgShare = ranked.find((t) => t.key === teamId)?.share ?? 0;
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-6 px-6 py-6 lg:px-8">
       {/* team picker */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Select value={teamId} onValueChange={setPicked}>

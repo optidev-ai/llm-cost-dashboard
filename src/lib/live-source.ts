@@ -102,19 +102,42 @@ async function callProxy(payload: Record<string, unknown>): Promise<Record<strin
   const body = JSON.stringify(payload);
   const res = await signedFetch(`${base}/usage`, { method: "POST", headers, body });
   if (!res.ok) {
+    // Surface the function's own message (e.g. a friendly "key rejected" string)
+    // rather than a raw status dump.
     const text = await res.text().catch(() => "");
-    throw new Error(`Proxy error ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+    let msg = text.slice(0, 300);
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      if (parsed?.error) msg = parsed.error;
+    } catch {
+      /* not JSON — keep the raw text */
+    }
+    throw new Error(msg || `Request failed (${res.status})`);
   }
   return (await res.json()) as Record<string, unknown>;
 }
 
 /**
- * Save the admin key once — the function encrypts and stores it server-side, so
- * it never persists in the browser and subsequent loads work without re-entry.
+ * Store + validate one provider's admin key. The function encrypts it server-side
+ * (never persists in the browser) and does a fast validity check, so this returns
+ * in ~1s — the slow usage pull happens afterward on the dashboard. Throws with a
+ * friendly message if the key is rejected.
  */
 export async function connectKey(provider: ProviderId, adminKey: string): Promise<void> {
   const out = await callProxy({ action: "connect", provider, adminKey });
   if (!out.ok) throw new Error(typeof out.error === "string" ? out.error : "Failed to store key");
+}
+
+/** List the providers that currently have a stored key. */
+export async function listProviders(): Promise<ProviderId[]> {
+  const out = await callProxy({ action: "providers" });
+  return Array.isArray(out.providers) ? (out.providers as ProviderId[]) : [];
+}
+
+/** Remove one provider's key. Returns the remaining connected providers. */
+export async function disconnectProvider(provider: ProviderId): Promise<ProviderId[]> {
+  const out = await callProxy({ action: "disconnect", provider });
+  return Array.isArray(out.providers) ? (out.providers as ProviderId[]) : [];
 }
 
 /**

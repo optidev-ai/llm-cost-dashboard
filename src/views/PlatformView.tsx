@@ -1,7 +1,7 @@
 import { Activity, Gauge, Layers, Zap } from "lucide-react";
 import { useMemo } from "react";
 import { MiniBarMeter, MixDonut } from "@/components/dashboard/charts";
-import { CapsLabel, SectionCard, StatTile, StatusDot } from "@/components/dashboard/primitives";
+import { CapsLabel, SectionCard, SectionHeader, StatTile, StatusDot } from "@/components/dashboard/primitives";
 import { budgetByTeam, capabilities, kpis, latency, rowsInRange, spendByModel, spendByProvider } from "@/lib/analytics";
 import { useDashboard } from "@/lib/datasource";
 import { fmtCompact, fmtCurrency, fmtMs, fmtPct } from "@/lib/format";
@@ -87,132 +87,141 @@ export function PlatformView() {
   const stagger = (i: number) => ({ animationDelay: `${i * 60}ms` });
 
   return (
-    <div className="space-y-4 p-6">
-      {/* KPIs */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="animate-slide-up" style={stagger(0)}>
-          <StatTile
-            label={`Requests · ${range.label}`}
-            value={noReq ? "—" : fmtCompact(k.requests)}
-            icon={Activity}
-            sub={noReq ? "not reported by this source" : `${fmtCompact(k.tokens)} tokens`}
-          />
+    <div className="space-y-8 px-6 py-6 lg:px-8">
+      {/* Overview */}
+      <section>
+        <SectionHeader title="Overview" hint={range.label} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="animate-slide-up" style={stagger(0)}>
+            <StatTile
+              label={`Requests · ${range.label}`}
+              value={noReq ? "—" : fmtCompact(k.requests)}
+              icon={Activity}
+              sub={noReq ? "not reported by this source" : `${fmtCompact(k.tokens)} tokens`}
+            />
+          </div>
+          <div className="animate-slide-up" style={stagger(1)}>
+            <StatTile
+              label="Cost / 1k requests"
+              value={noReq ? "—" : fmtCurrency(k.costPerRequest * 1000)}
+              icon={Zap}
+              sub={noReq ? "needs request counts" : "blended across models"}
+            />
+          </div>
+          <div className="animate-slide-up" style={stagger(2)}>
+            <StatTile
+              label="Cache-hit rate"
+              value={fmtPct(k.cacheHitRate * 100)}
+              icon={Layers}
+              accent
+              sub="of input tokens served from cache"
+            />
+          </div>
+          <div className="animate-slide-up" style={stagger(3)}>
+            <StatTile
+              label="p95 latency"
+              value={noPerf ? "—" : fmtMs(lat.p95)}
+              icon={Gauge}
+              sub={noPerf ? "needs a gateway" : `p50 ${fmtMs(lat.p50)}`}
+            />
+          </div>
         </div>
-        <div className="animate-slide-up" style={stagger(1)}>
-          <StatTile
-            label="Cost / 1k requests"
-            value={noReq ? "—" : fmtCurrency(k.costPerRequest * 1000)}
-            icon={Zap}
-            sub={noReq ? "needs request counts" : "blended across models"}
-          />
-        </div>
-        <div className="animate-slide-up" style={stagger(2)}>
-          <StatTile
-            label="Cache-hit rate"
-            value={fmtPct(k.cacheHitRate * 100)}
-            icon={Layers}
-            accent
-            sub="of input tokens served from cache"
-          />
-        </div>
-        <div className="animate-slide-up" style={stagger(3)}>
-          <StatTile
-            label="p95 latency"
-            value={noPerf ? "—" : fmtMs(lat.p95)}
-            icon={Gauge}
-            sub={noPerf ? "needs a gateway" : `p50 ${fmtMs(lat.p50)}`}
-          />
-        </div>
-      </div>
+      </section>
 
-      {/* mix + reliability */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <SectionCard title="Spend by model" subtitle={`${range.label} · ${dataset.models.length} models`}>
-          <MixDonut
-            data={models}
-            colorFor={(key) => modelColor(key, dataset.models)}
-            centerLabel="Total"
-            centerValue={fmtCurrency(k.spend)}
-          />
-        </SectionCard>
-        <SectionCard title="Reliability" subtitle="Latency & error rate">
-          <ReliabilityPanel noPerf={noPerf} p50={lat.p50} p95={lat.p95} errorRate={k.errorRate} />
-        </SectionCard>
-        <SectionCard
-          title="Spend by provider"
-          subtitle={`${providers.length} provider${providers.length === 1 ? "" : "s"}`}
-        >
-          <MixDonut
-            data={providers}
-            colorFor={(key) => providerColor(key as never)}
-            centerLabel="Providers"
-            centerValue={`${providers.length}`}
-          />
-        </SectionCard>
-      </div>
+      {/* Health */}
+      <section>
+        <SectionHeader title="Health" hint="model mix · reliability" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <SectionCard title="Spend by model" subtitle={`${range.label} · ${dataset.models.length} models`}>
+            <MixDonut
+              data={models}
+              colorFor={(key) => modelColor(key, dataset.models)}
+              centerLabel="Total"
+              centerValue={fmtCurrency(k.spend)}
+            />
+          </SectionCard>
+          <SectionCard title="Reliability" subtitle="Latency & error rate">
+            <ReliabilityPanel noPerf={noPerf} p50={lat.p50} p95={lat.p95} errorRate={k.errorRate} />
+          </SectionCard>
+          <SectionCard
+            title="Spend by provider"
+            subtitle={`${providers.length} provider${providers.length === 1 ? "" : "s"}`}
+          >
+            <MixDonut
+              data={providers}
+              colorFor={(key) => providerColor(key as never)}
+              centerLabel="Providers"
+              centerValue={`${providers.length}`}
+            />
+          </SectionCard>
+        </div>
+      </section>
 
-      {/* headroom + governance */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <SectionCard
-          className="lg:col-span-2"
-          title="Budget headroom"
-          subtitle="Remaining budget by team (forecast vs. monthly budget)"
-        >
-          <ul className="space-y-3">
-            {budgets.slice(0, 8).map((b) => {
-              const headroom = Math.max(0, 1 - b.util);
-              const tone =
-                b.status === "over"
-                  ? "var(--status-critical)"
-                  : b.status === "watch"
-                    ? "var(--status-warning)"
-                    : "var(--status-good)";
-              const dot = b.status === "over" ? "critical" : b.status === "watch" ? "warning" : "good";
-              return (
-                <li key={b.teamId} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1">
-                  <span className="flex items-center gap-2 truncate text-sm text-foreground">
-                    <StatusDot tone={dot as never} />
-                    {b.name}
-                  </span>
-                  <span className="tnum text-sm text-foreground">{fmtPct(headroom * 100, 0)} left</span>
-                  <span className="col-span-2">
-                    <MiniBarMeter value={b.util} tone={tone} />
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </SectionCard>
+      {/* Budgets & governance */}
+      <section>
+        <SectionHeader title="Budgets & governance" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <SectionCard
+            className="lg:col-span-2"
+            title="Budget headroom"
+            subtitle="Remaining budget by team (forecast vs. monthly budget)"
+          >
+            <ul className="space-y-3">
+              {budgets.slice(0, 8).map((b) => {
+                const headroom = Math.max(0, 1 - b.util);
+                const tone =
+                  b.status === "over"
+                    ? "var(--status-critical)"
+                    : b.status === "watch"
+                      ? "var(--status-warning)"
+                      : "var(--status-good)";
+                const dot = b.status === "over" ? "critical" : b.status === "watch" ? "warning" : "good";
+                return (
+                  <li key={b.teamId} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1">
+                    <span className="flex items-center gap-2 truncate text-sm text-foreground">
+                      <StatusDot tone={dot as never} />
+                      {b.name}
+                    </span>
+                    <span className="tnum text-sm text-foreground">{fmtPct(headroom * 100, 0)} left</span>
+                    <span className="col-span-2">
+                      <MiniBarMeter value={b.util} tone={tone} />
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </SectionCard>
 
-        <SectionCard title="Model governance" subtitle={`Premium-model usage (≥ $${PREMIUM_OUT_PRICE}/1M out)`}>
-          {premium.hasPolicy ? (
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-baseline justify-between">
-                  <CapsLabel>Premium share of spend</CapsLabel>
-                  <span
-                    className="tnum text-2xl font-semibold"
-                    style={{ color: premium.share > 0.4 ? "var(--status-warning)" : "var(--foreground)" }}
-                  >
-                    {fmtPct(premium.share * 100, 0)}
-                  </span>
+          <SectionCard title="Model governance" subtitle={`Premium-model usage (≥ $${PREMIUM_OUT_PRICE}/1M out)`}>
+            {premium.hasPolicy ? (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-baseline justify-between">
+                    <CapsLabel>Premium share of spend</CapsLabel>
+                    <span
+                      className="tnum text-2xl font-semibold"
+                      style={{ color: premium.share > 0.4 ? "var(--status-warning)" : "var(--foreground)" }}
+                    >
+                      {fmtPct(premium.share * 100, 0)}
+                    </span>
+                  </div>
+                  <MiniBarMeter
+                    value={premium.share}
+                    tone={premium.share > 0.4 ? "var(--status-warning)" : "var(--series-5)"}
+                    className="mt-2"
+                  />
                 </div>
-                <MiniBarMeter
-                  value={premium.share}
-                  tone={premium.share > 0.4 ? "var(--status-warning)" : "var(--series-5)"}
-                  className="mt-2"
-                />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {fmtCurrency(premium.spend)} on {premium.names.join(", ")}. High premium share is a routing-savings
+                  opportunity — cheaper models may serve some of this traffic.
+                </p>
               </div>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {fmtCurrency(premium.spend)} on {premium.names.join(", ")}. High premium share is a routing-savings
-                opportunity — cheaper models may serve some of this traffic.
-              </p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No premium models in use this period.</p>
-          )}
-        </SectionCard>
-      </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No premium models in use this period.</p>
+            )}
+          </SectionCard>
+        </div>
+      </section>
     </div>
   );
 }

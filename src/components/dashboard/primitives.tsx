@@ -7,6 +7,17 @@ export function CapsLabel({ children, className }: { children: ReactNode; classN
   return <div className={cn("label-caps", className)}>{children}</div>;
 }
 
+/** A light section divider — caps label + hairline rule — for grouping a view. */
+export function SectionHeader({ title, hint }: { title: string; hint?: ReactNode }) {
+  return (
+    <div className="mb-3.5 flex items-center gap-3">
+      <h2 className="label-caps whitespace-nowrap">{title}</h2>
+      <span className="h-px flex-1 bg-border/60" />
+      {hint && <span className="whitespace-nowrap text-[11px] text-muted-foreground">{hint}</span>}
+    </div>
+  );
+}
+
 /** Signed delta chip. For cost metrics, up is bad → pass goodDirection="down". */
 export function DeltaBadge({
   value,
