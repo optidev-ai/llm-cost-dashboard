@@ -4,9 +4,10 @@
  * export) will implement the same `Dataset` contract, so nothing downstream
  * changes when we add them.
  */
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { getDemoDataset } from "@/data/seed";
-import { fetchLiveUsage, getProxyUrl } from "./live-source";
+import { clearLiveCache, readLiveCache, writeLiveCache } from "./live-cache";
+import { fetchLiveUsage, getProxyUrl, NoKeyError } from "./live-source";
 import type { DataMode, Dataset, DateRange } from "./types";
 
 function shift(iso: string, days: number): string {
@@ -33,39 +34,67 @@ interface DashboardCtx {
   setRange: (r: DateRange) => void;
   /** Swap the demo dataset for live data (Mode ②/③). */
   connectLive: (ds: Dataset, mode?: DataMode) => void;
+  /** True while a live fetch is in flight (initial load or a manual refresh). */
+  isRefreshing: boolean;
+  /** Force a fresh pull from the provider APIs (bypasses server cache). */
+  refresh: () => void;
 }
 
 const Ctx = createContext<DashboardCtx | null>(null);
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const demo = useMemo(() => getDemoDataset(), []);
-  const [dataset, setDataset] = useState<Dataset>(demo);
-  const [mode, setMode] = useState<DataMode>("demo");
+  // Hydrate synchronously from the client cache so a reload shows live data
+  // instantly instead of flashing demo while the slow provider fetch runs.
+  const cached = useMemo(() => readLiveCache(), []);
+  const [dataset, setDataset] = useState<Dataset>(cached ?? demo);
+  const [mode, setMode] = useState<DataMode>(cached ? "key" : "demo");
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [rangeLabel, setRangeLabel] = useState("30D"); // default 30D
 
   const ranges = useMemo(() => buildRanges(dataset), [dataset]);
   const range = ranges.find((r) => r.label === rangeLabel) ?? ranges[1];
 
-  // Auto-load: if a backend proxy is wired (remixed on OptiDev / self-hosted) and
-  // an admin key was connected earlier, pull real data on open — no dialog needed.
-  // Any failure (no key yet, no proxy, provider error) silently stays on demo.
-  useEffect(() => {
-    if (!getProxyUrl()) return;
-    let cancelled = false;
-    fetchLiveUsage({ days: 90 })
-      .then((ds) => {
-        if (!cancelled) {
+  // Fetch live data through the proxy and reconcile UI + cache. Shared by the
+  // on-open auto-load and the manual refresh. `force` bypasses the server cache.
+  const loadLive = useCallback(
+    (force: boolean, signal?: { cancelled: boolean }) => {
+      if (!getProxyUrl()) return;
+      setIsRefreshing(true);
+      fetchLiveUsage({ days: 90, refresh: force })
+        .then((ds) => {
+          if (signal?.cancelled) return;
           setDataset(ds);
           setMode("key");
-        }
-      })
-      .catch(() => {
-        /* NoKeyError / not configured / provider error → stay on demo data */
-      });
+          writeLiveCache(ds);
+        })
+        .catch((e: unknown) => {
+          if (signal?.cancelled) return;
+          // Key removed server-side → drop the stale cache and fall back to demo.
+          if (e instanceof NoKeyError) {
+            clearLiveCache();
+            setDataset(demo);
+            setMode("demo");
+          }
+          // Transient / provider error → keep whatever we're showing (cache or demo).
+        })
+        .finally(() => {
+          if (!signal?.cancelled) setIsRefreshing(false);
+        });
+    },
+    [demo],
+  );
+
+  // Auto-load on open: if a proxy is wired and a key was connected earlier, pull
+  // (or revalidate) real data. With a warm client cache this is a background
+  // stale-while-revalidate; with none it upgrades demo → live once it resolves.
+  useEffect(() => {
+    const signal = { cancelled: false };
+    loadLive(false, signal);
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
     };
-  }, []);
+  }, [loadLive]);
 
   const value = useMemo<DashboardCtx>(
     () => ({
@@ -73,13 +102,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       mode,
       ranges,
       range,
+      isRefreshing,
       setRange: (r: DateRange) => setRangeLabel(r.label),
       connectLive: (ds: Dataset, m: DataMode = "key") => {
         setDataset(ds);
         setMode(m);
+        if (m === "key") writeLiveCache(ds);
       },
+      refresh: () => loadLive(true),
     }),
-    [dataset, mode, ranges, range],
+    [dataset, mode, ranges, range, isRefreshing, loadLive],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

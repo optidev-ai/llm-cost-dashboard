@@ -1,4 +1,5 @@
 import { Cpu, LayoutDashboard, type LucideIcon, ScrollText, Users } from "lucide-react";
+import { isInsideOptiDev } from "@/lib/env";
 import type { PersonaView } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +38,9 @@ function LogoMark() {
 }
 
 export function Sidebar({ active, onNavigate }: { active: PersonaView; onNavigate: (v: PersonaView) => void }) {
+  // The "build this on OptiDev" CTA is lead-gen for the public demo — hide it
+  // once the user is already inside an OptiDev workspace.
+  const showOptiDevCta = !isInsideOptiDev();
   return (
     <aside className="flex w-[248px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
       <div className="flex items-center gap-2.5 px-5 py-4">
@@ -83,37 +87,39 @@ export function Sidebar({ active, onNavigate }: { active: PersonaView; onNavigat
         })}
       </nav>
 
-      <div className="p-3">
-        <a
-          href="https://app.optidev.ai"
-          target="_blank"
-          rel="noreferrer"
-          className="group flex flex-col gap-2 rounded-xl border border-primary/25 bg-gradient-to-br from-primary/10 to-transparent p-3.5 transition-colors hover:border-primary/50"
-        >
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span className="pulse-dot" />
-            Make it yours
-          </div>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            Fork this dashboard on OptiDev and customize it by chatting — add alerts, exports, your own metrics.
-          </p>
-          <span className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-primary">
-            Open in OptiDev
-            <svg
-              viewBox="0 0 24 24"
-              className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.25"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M7 17L17 7M7 7h10v10" />
-            </svg>
-          </span>
-        </a>
-      </div>
+      {showOptiDevCta && (
+        <div className="p-3">
+          <a
+            href="https://app.optidev.ai"
+            target="_blank"
+            rel="noreferrer"
+            className="group flex flex-col gap-2 rounded-xl border border-primary/25 bg-gradient-to-br from-primary/10 to-transparent p-3.5 transition-colors hover:border-primary/50"
+          >
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <span className="pulse-dot" />
+              Make it yours
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Fork this dashboard on OptiDev and customize it by chatting — add alerts, exports, your own metrics.
+            </p>
+            <span className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-primary">
+              Open in OptiDev
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.25"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M7 17L17 7M7 7h10v10" />
+              </svg>
+            </span>
+          </a>
+        </div>
+      )}
     </aside>
   );
 }

@@ -277,8 +277,61 @@ async function loadCredential(): Promise<{ provider: Provider; adminKey: string 
   }
 }
 
+// ── server-side dataset cache (skip the slow provider APIs on repeat loads) ─────
+// Billing/usage data changes slowly; caching the built Dataset for a few minutes
+// turns repeat loads (reloads, background revalidations, multiple viewers) from a
+// multi-second provider round-trip into a single fast DB read. `refresh` bypasses it.
+const CACHE_TTL_MIN = 10;
+
+async function loadCachedDataset(provider: Provider, days: number): Promise<unknown | null> {
+  const url = dbUrl();
+  if (!url) return null;
+  const sql = postgres(url, { prepare: false });
+  try {
+    const rows = await sql`select dataset from app_usage_cache
+      where id = ${`${provider}:${days}`} and updated_at > now() - (${CACHE_TTL_MIN} * interval '1 minute')
+      limit 1`;
+    return rows.length ? rows[0].dataset : null;
+  } catch {
+    return null; // table not created yet / read error → treat as cache miss
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+async function saveCachedDataset(provider: Provider, days: number, dataset: unknown): Promise<void> {
+  const url = dbUrl();
+  if (!url) return;
+  const sql = postgres(url, { prepare: false });
+  try {
+    await sql`create table if not exists app_usage_cache (
+      id text primary key,
+      dataset jsonb not null,
+      updated_at timestamptz not null default now()
+    )`;
+    await sql`insert into app_usage_cache (id, dataset, updated_at)
+      values (${`${provider}:${days}`}, ${sql.json(dataset as object)}, now())
+      on conflict (id) do update set dataset = excluded.dataset, updated_at = now()`;
+  } catch {
+    // cache write is best-effort — never fail the fetch over it
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 function json(data: unknown, status: number): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, "content-type": "application/json" } });
+}
+
+// Fetch actual billed cost for a provider (best-effort; 0 on any error).
+async function fetchBilled(provider: Provider, adminKey: string, days: number): Promise<number> {
+  try {
+    return provider === "anthropic"
+      ? await fetchAnthropicBilled(adminKey, days)
+      : await fetchOpenAIBilled(adminKey, days);
+  } catch {
+    return 0;
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -298,6 +351,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const days = Math.min(Math.max(Number(body.days) || 90, 1), 180);
+    const refresh = body.refresh === true;
     let cred = await loadCredential();
     if (!cred) {
       const bodyKey = body.adminKey && String(body.adminKey).trim();
@@ -307,41 +361,50 @@ Deno.serve(async (req: Request) => {
     }
     if (!cred) return json({ needsKey: true }, 200);
 
+    // Fast path: return the recently-cached dataset without touching the (slow)
+    // provider APIs. `refresh: true` forces a fresh pull.
+    if (!refresh) {
+      const cached = await loadCachedDataset(cred.provider, days);
+      if (cached) return json(cached, 200);
+    }
+
     const fetcher = cred.provider === "anthropic" ? fetchAnthropic : fetchOpenAI;
+    // Fetch usage and actual billed cost concurrently (they're independent, and
+    // each provider call is slow) — roughly halves the round-trip.
     let effectiveDays = days;
-    let rows = await fetcher(cred.adminKey, effectiveDays);
+    let [rows, billedCost] = await Promise.all([
+      fetcher(cred.adminKey, effectiveDays),
+      fetchBilled(cred.provider, cred.adminKey, effectiveDays),
+    ]);
     // Sparse orgs (test / low-usage) can have no activity in the requested window
-    // but real spend further back. Auto-widen once to ~13 months before giving up,
-    // so the dashboard shows real data whenever any exists. Active orgs hit the
-    // first pass and never pay for the wider scan.
+    // but real spend further back. Auto-widen once to ~13 months before giving up.
+    // Active orgs hit the first pass and never pay for the wider scan.
     if (rows.length === 0 && effectiveDays < 400) {
       effectiveDays = 400;
-      rows = await fetcher(cred.adminKey, effectiveDays);
+      [rows, billedCost] = await Promise.all([
+        fetcher(cred.adminKey, effectiveDays),
+        fetchBilled(cred.provider, cred.adminKey, effectiveDays),
+      ]);
     }
     if (rows.length === 0) {
       return json({ error: "No usage found for this org in the last 13 months. The key is valid, but the org has no recorded activity in that window — check the provider's own usage dashboard." }, 404);
     }
     const dataset = buildDataset(cred.provider, rows, effectiveDays);
     // Attach invoice reconciliation from the Cost API (best-effort — the usage
-    // response stands on its own if the Cost API is unavailable or errors).
-    try {
+    // response stands on its own if the Cost API was unavailable, billedCost = 0).
+    if (billedCost > 0) {
       const estimatedCost = rows.reduce((s, r) => s + r.cost, 0);
-      const billedCost = cred.provider === "anthropic"
-        ? await fetchAnthropicBilled(cred.adminKey, effectiveDays)
-        : await fetchOpenAIBilled(cred.adminKey, effectiveDays);
-      if (billedCost > 0) {
-        (dataset as Record<string, unknown>).billing = {
-          billedCost,
-          estimatedCost,
-          source: "cost-api",
-          from: dataset.startDate,
-          to: dataset.endDate,
-          byProvider: [{ provider: cred.provider, billed: billedCost, estimated: estimatedCost }],
-        };
-      }
-    } catch (_) {
-      // Cost API optional — omit billing rather than fail the whole fetch.
+      (dataset as Record<string, unknown>).billing = {
+        billedCost,
+        estimatedCost,
+        source: "cost-api",
+        from: dataset.startDate,
+        to: dataset.endDate,
+        byProvider: [{ provider: cred.provider, billed: billedCost, estimated: estimatedCost }],
+      };
     }
+    // Warm the cache for subsequent loads (best-effort, keyed by requested days).
+    await saveCachedDataset(cred.provider, days, dataset);
     return json(dataset, 200);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";

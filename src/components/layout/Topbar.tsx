@@ -1,4 +1,4 @@
-import { KeyRound } from "lucide-react";
+import { KeyRound, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { ConnectKeyDialog } from "@/components/dashboard/ConnectKeyDialog";
 import { useDashboard } from "@/lib/datasource";
@@ -13,9 +13,10 @@ const TITLES: Record<PersonaView, { title: string; sub: string }> = {
 };
 
 export function Topbar({ view }: { view: PersonaView }) {
-  const { ranges, range, setRange, dataset, mode, connectLive } = useDashboard();
+  const { ranges, range, setRange, dataset, mode, connectLive, isRefreshing, refresh } = useDashboard();
   const [connectOpen, setConnectOpen] = useState(false);
   const t = TITLES[view];
+  const isLive = mode !== "demo";
 
   return (
     <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background/80 px-6 py-3.5 backdrop-blur">
@@ -30,15 +31,32 @@ export function Topbar({ view }: { view: PersonaView }) {
       </div>
 
       <div className="flex items-center gap-2.5">
-        {/* data-mode badge */}
+        {/* data-mode badge (+ refresh when live) */}
         <span
           className={cn(
             "hidden items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium md:inline-flex",
-            mode === "demo" ? "border-primary/30 bg-primary/10 text-primary" : "border-status-good/30 text-status-good",
+            isLive ? "border-status-good/30 text-status-good" : "border-primary/30 bg-primary/10 text-primary",
           )}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-current" />
-          {mode === "demo" ? "Demo data" : "Live"}
+          <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRefreshing && "animate-pulse")} />
+          {isLive
+            ? isRefreshing
+              ? "Live · updating…"
+              : "Live"
+            : isRefreshing
+              ? "Checking for live data…"
+              : "Demo data"}
+          {isLive && (
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={isRefreshing}
+              title="Refresh live data"
+              className="ml-0.5 text-status-good/80 transition-colors hover:text-status-good disabled:opacity-50"
+            >
+              <RefreshCw className={cn("h-3 w-3", isRefreshing && "animate-spin")} strokeWidth={2.25} />
+            </button>
+          )}
         </span>
 
         {/* range segmented control */}

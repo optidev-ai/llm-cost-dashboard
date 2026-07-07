@@ -120,9 +120,17 @@ export async function connectKey(provider: ProviderId, adminKey: string): Promis
 /**
  * Fetch the org's real usage via the proxy (using the stored key) and return a
  * `Dataset`. Throws NoKeyError if the backend is up but no key is connected yet.
+ * `refresh: true` bypasses the edge function's server-side cache to force a fresh
+ * pull from the provider APIs.
  */
-export async function fetchLiveUsage({ days = 90 }: { days?: number } = {}): Promise<Dataset> {
-  const out = await callProxy({ action: "fetch", days });
+export async function fetchLiveUsage({
+  days = 90,
+  refresh = false,
+}: {
+  days?: number;
+  refresh?: boolean;
+} = {}): Promise<Dataset> {
+  const out = await callProxy({ action: "fetch", days, refresh });
   if (out.needsKey) throw new NoKeyError();
   return out as unknown as Dataset;
 }
