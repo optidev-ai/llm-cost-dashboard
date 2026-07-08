@@ -109,12 +109,26 @@ function dedupeRows(rows: RawRow[]): RawRow[] {
   return out;
 }
 
+// Provider org APIs return transient 429/500/502/503s (Anthropic's usage endpoint
+// especially). Retry those with backoff so a single blip doesn't fail the whole
+// (multi-provider) fetch. Non-transient errors return immediately for the caller
+// to handle.
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+async function fetchRetry(url: string, init: RequestInit, attempts = 4): Promise<Response> {
+  let res = await fetch(url, init);
+  for (let i = 1; i < attempts && !res.ok && RETRYABLE.has(res.status); i++) {
+    await new Promise((r) => setTimeout(r, 400 * i));
+    res = await fetch(url, init);
+  }
+  return res;
+}
+
 // ── provider fetchers (usage) ────────────────────────────────────────────────────
 async function fetchAnthropicWindow(adminKey: string, w: TimeWindow, names: Record<string, string>): Promise<RawRow[]> {
   const qs = new URLSearchParams({ starting_at: w.start.toISOString(), ending_at: w.end.toISOString(), bucket_width: "1d", limit: "31" });
   qs.append("group_by[]", "model");
   qs.append("group_by[]", "workspace_id");
-  const res = await fetch(`https://api.anthropic.com/v1/organizations/usage_report/messages?${qs}`, {
+  const res = await fetchRetry(`https://api.anthropic.com/v1/organizations/usage_report/messages?${qs}`, {
     headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
   });
   if (!res.ok) throw new Error(`Anthropic usage API ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -168,7 +182,7 @@ async function fetchOpenAIWindow(adminKey: string, w: TimeWindow, names: Record<
   });
   qs.append("group_by[]", "model");
   qs.append("group_by[]", "project_id");
-  const res = await fetch(`https://api.openai.com/v1/organization/usage/completions?${qs}`, {
+  const res = await fetchRetry(`https://api.openai.com/v1/organization/usage/completions?${qs}`, {
     headers: { Authorization: `Bearer ${adminKey}` },
   });
   if (!res.ok) throw new Error(`OpenAI usage API ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -237,7 +251,7 @@ const ANTHROPIC_COST_UNITS_PER_DOLLAR = 100;
 
 async function fetchAnthropicBilledWindow(adminKey: string, w: TimeWindow): Promise<number> {
   const qs = new URLSearchParams({ starting_at: w.start.toISOString(), ending_at: w.end.toISOString(), bucket_width: "1d", limit: "31" });
-  const res = await fetch(`https://api.anthropic.com/v1/organizations/cost_report?${qs}`, {
+  const res = await fetchRetry(`https://api.anthropic.com/v1/organizations/cost_report?${qs}`, {
     headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
   });
   if (!res.ok) throw new Error(`Anthropic cost API ${res.status}`);
@@ -262,7 +276,7 @@ async function fetchOpenAIBilledWindow(adminKey: string, w: TimeWindow): Promise
     bucket_width: "1d",
     limit: "31",
   });
-  const res = await fetch(`https://api.openai.com/v1/organization/costs?${qs}`, {
+  const res = await fetchRetry(`https://api.openai.com/v1/organization/costs?${qs}`, {
     headers: { Authorization: `Bearer ${adminKey}` },
   });
   if (!res.ok) throw new Error(`OpenAI cost API ${res.status}`);
@@ -555,16 +569,24 @@ Deno.serve(async (req: Request) => {
 
     // Pull usage + billed cost for every provider concurrently, with friendly
     // workspace/project names resolved so teams read "OptiEdge" not "Workspace …".
+    // Each provider is isolated: if one fails (after retries), it returns empty so
+    // the others still render — one provider's outage never blanks the whole view.
+    const failed: Provider[] = [];
     const pull = async (effectiveDays: number) =>
       Promise.all(
         creds.map(async (c) => {
-          const fetcher = c.provider === "anthropic" ? fetchAnthropic : fetchOpenAI;
-          const names = await fetchNames(c.provider, c.adminKey);
-          const [rows, billed] = await Promise.all([
-            fetcher(c.adminKey, effectiveDays, names),
-            fetchBilled(c.provider, c.adminKey, effectiveDays),
-          ]);
-          return { provider: c.provider, rows, billed };
+          try {
+            const fetcher = c.provider === "anthropic" ? fetchAnthropic : fetchOpenAI;
+            const names = await fetchNames(c.provider, c.adminKey);
+            const [rows, billed] = await Promise.all([
+              fetcher(c.adminKey, effectiveDays, names),
+              fetchBilled(c.provider, c.adminKey, effectiveDays),
+            ]);
+            return { provider: c.provider, rows, billed };
+          } catch {
+            if (!failed.includes(c.provider)) failed.push(c.provider);
+            return { provider: c.provider, rows: [] as RawRow[], billed: 0 };
+          }
         }),
       );
 
@@ -597,7 +619,13 @@ Deno.serve(async (req: Request) => {
         byProvider,
       };
     }
-    await saveCachedDataset(cacheKey, dataset);
+    // Only cache a complete result — never persist a partial view from a provider
+    // that failed this round, so the next load retries it fresh.
+    if (failed.length === 0) {
+      await saveCachedDataset(cacheKey, dataset);
+    } else {
+      (dataset as Record<string, unknown>).partialProviders = failed;
+    }
     return json(dataset, 200);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
