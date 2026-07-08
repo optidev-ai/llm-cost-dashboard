@@ -126,12 +126,22 @@ async function fetchAnthropicWindow(adminKey: string, w: TimeWindow): Promise<Ra
       const model = r.model ?? "unknown";
       const uncached = r.uncached_input_tokens ?? 0;
       const cacheRead = r.cache_read_input_tokens ?? 0;
-      const cacheCreate = r.cache_creation_input_tokens ?? 0;
+      // Cache-creation moved to a nested object (5-minute vs 1-hour TTL); the old
+      // flat cache_creation_input_tokens field is gone. Missing it dropped the
+      // single biggest cost bucket to $0. 5m write = 1.25× input, 1h write = 2×.
+      const cc = r.cache_creation ?? {};
+      const cache5m = cc.ephemeral_5m_input_tokens ?? 0;
+      const cache1h = cc.ephemeral_1h_input_tokens ?? 0;
+      const cacheCreate = cache5m + cache1h;
       const output = r.output_tokens ?? 0;
-      if (uncached + cacheRead + cacheCreate + output === 0) continue;
+      const webSearches = r.server_tool_use?.web_search_requests ?? 0;
+      if (uncached + cacheRead + cacheCreate + output + webSearches === 0) continue;
       const p = priceFor("anthropic", model);
       const batch = r.service_tier === "batch" ? 0.5 : 1;
-      const cost = ((uncached * p.in + cacheRead * p.in * 0.1 + cacheCreate * p.in * 1.25 + output * p.out) / 1e6) * batch;
+      const cost =
+        ((uncached * p.in + cacheRead * p.in * 0.1 + cache5m * p.in * 1.25 + cache1h * p.in * 2 + output * p.out) / 1e6) *
+          batch +
+        (webSearches / 1000) * 10; // web search billed ~$10 / 1k requests
       const wsId = r.workspace_id ?? "default";
       rows.push({
         date, provider: "anthropic", teamId: `anthropic:${wsId}`,
