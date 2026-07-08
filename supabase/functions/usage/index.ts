@@ -110,7 +110,7 @@ function dedupeRows(rows: RawRow[]): RawRow[] {
 }
 
 // ── provider fetchers (usage) ────────────────────────────────────────────────────
-async function fetchAnthropicWindow(adminKey: string, w: TimeWindow): Promise<RawRow[]> {
+async function fetchAnthropicWindow(adminKey: string, w: TimeWindow, names: Record<string, string>): Promise<RawRow[]> {
   const qs = new URLSearchParams({ starting_at: w.start.toISOString(), ending_at: w.end.toISOString(), bucket_width: "1d", limit: "31" });
   qs.append("group_by[]", "model");
   qs.append("group_by[]", "workspace_id");
@@ -145,7 +145,7 @@ async function fetchAnthropicWindow(adminKey: string, w: TimeWindow): Promise<Ra
       const wsId = r.workspace_id ?? "default";
       rows.push({
         date, provider: "anthropic", teamId: `anthropic:${wsId}`,
-        teamName: r.workspace_id ? `Workspace ${String(wsId).slice(-6)}` : "Default workspace",
+        teamName: r.workspace_id ? (names[wsId] ?? `Workspace ${String(wsId).slice(-6)}`) : "Default workspace",
         modelId: model, inputTokens: uncached + cacheRead + cacheCreate, outputTokens: output,
         cachedTokens: cacheRead, requests: 0, errors: 0, cost,
       });
@@ -154,12 +154,12 @@ async function fetchAnthropicWindow(adminKey: string, w: TimeWindow): Promise<Ra
   return rows;
 }
 
-async function fetchAnthropic(adminKey: string, days: number): Promise<RawRow[]> {
-  const parts = await mapLimit(timeWindows(days), FETCH_CONCURRENCY, (w) => fetchAnthropicWindow(adminKey, w));
+async function fetchAnthropic(adminKey: string, days: number, names: Record<string, string>): Promise<RawRow[]> {
+  const parts = await mapLimit(timeWindows(days), FETCH_CONCURRENCY, (w) => fetchAnthropicWindow(adminKey, w, names));
   return dedupeRows(parts.flat());
 }
 
-async function fetchOpenAIWindow(adminKey: string, w: TimeWindow): Promise<RawRow[]> {
+async function fetchOpenAIWindow(adminKey: string, w: TimeWindow, names: Record<string, string>): Promise<RawRow[]> {
   const qs = new URLSearchParams({
     start_time: String(Math.floor(w.start.getTime() / 1000)),
     end_time: String(Math.floor(w.end.getTime() / 1000)),
@@ -188,7 +188,7 @@ async function fetchOpenAIWindow(adminKey: string, w: TimeWindow): Promise<RawRo
       const projId = r.project_id ?? "default";
       rows.push({
         date, provider: "openai", teamId: `openai:${projId}`,
-        teamName: r.project_id ? `Project ${String(projId).slice(-6)}` : "Default project",
+        teamName: r.project_id ? (names[projId] ?? `Project ${String(projId).slice(-6)}`) : "Default project",
         modelId: model, inputTokens: input, outputTokens: output, cachedTokens: cached,
         requests: r.num_model_requests ?? 0, errors: 0, cost,
       });
@@ -197,9 +197,31 @@ async function fetchOpenAIWindow(adminKey: string, w: TimeWindow): Promise<RawRo
   return rows;
 }
 
-async function fetchOpenAI(adminKey: string, days: number): Promise<RawRow[]> {
-  const parts = await mapLimit(timeWindows(days), FETCH_CONCURRENCY, (w) => fetchOpenAIWindow(adminKey, w));
+async function fetchOpenAI(adminKey: string, days: number, names: Record<string, string>): Promise<RawRow[]> {
+  const parts = await mapLimit(timeWindows(days), FETCH_CONCURRENCY, (w) => fetchOpenAIWindow(adminKey, w, names));
   return dedupeRows(parts.flat());
+}
+
+// Resolve friendly workspace/project names so teams read "OptiEdge" instead of
+// "Workspace 5XKYgY". Best-effort — falls back to the truncated id on any error.
+async function fetchNames(provider: Provider, adminKey: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  try {
+    if (provider === "anthropic") {
+      const res = await fetch("https://api.anthropic.com/v1/organizations/workspaces?limit=100", {
+        headers: { "x-api-key": adminKey, "anthropic-version": "2023-06-01" },
+      });
+      if (res.ok) for (const w of (await res.json()).data ?? []) if (w.id && w.name) out[w.id] = w.name;
+    } else {
+      const res = await fetch("https://api.openai.com/v1/organization/projects?limit=100", {
+        headers: { Authorization: `Bearer ${adminKey}` },
+      });
+      if (res.ok) for (const p of (await res.json()).data ?? []) if (p.id && p.name) out[p.id] = p.name;
+    }
+  } catch {
+    // names are cosmetic — never fail the fetch over them
+  }
+  return out;
 }
 
 // ── actual billed cost (Cost API — the invoice truth) ───────────────────────────
@@ -531,13 +553,15 @@ Deno.serve(async (req: Request) => {
       if (cached) return json(cached, 200);
     }
 
-    // Pull usage + billed cost for every provider concurrently.
+    // Pull usage + billed cost for every provider concurrently, with friendly
+    // workspace/project names resolved so teams read "OptiEdge" not "Workspace …".
     const pull = async (effectiveDays: number) =>
       Promise.all(
         creds.map(async (c) => {
           const fetcher = c.provider === "anthropic" ? fetchAnthropic : fetchOpenAI;
+          const names = await fetchNames(c.provider, c.adminKey);
           const [rows, billed] = await Promise.all([
-            fetcher(c.adminKey, effectiveDays),
+            fetcher(c.adminKey, effectiveDays, names),
             fetchBilled(c.provider, c.adminKey, effectiveDays),
           ]);
           return { provider: c.provider, rows, billed };
