@@ -80,7 +80,7 @@ export function StatTile({
   return (
     <div
       className={cn(
-        "group relative overflow-hidden rounded-xl border bg-card p-4 transition-colors",
+        "group relative flex h-full flex-col overflow-hidden rounded-xl border bg-card p-4 transition-colors",
         accent ? "border-primary/40" : "hover:border-border/80",
       )}
     >

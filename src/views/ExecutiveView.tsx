@@ -3,7 +3,6 @@ import { useMemo, useState } from "react";
 import { BudgetTable } from "@/components/dashboard/BudgetTable";
 import { MixDonut, RankedBars, SpendAreaChart } from "@/components/dashboard/charts";
 import { CapsLabel, DeltaBadge, SectionCard, SectionHeader, StatTile } from "@/components/dashboard/primitives";
-import { ReconcileCard } from "@/components/dashboard/ReconcileCard";
 import { Button } from "@/components/ui/button";
 import type { AllocationMethod } from "@/lib/analytics";
 import {
@@ -231,11 +230,6 @@ export function ExecutiveView() {
             />
           </div>
         </div>
-      </section>
-
-      {/* Reconciliation — its own band (self-titled) */}
-      <section className="animate-slide-up" style={stagger(4)}>
-        <ReconcileCard />
       </section>
 
       {/* Trends */}
