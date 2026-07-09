@@ -1,6 +1,4 @@
-<a href="https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac"><img src=".github/customize-button.svg" alt="Customize the app" height="44" align="right"></a>
-
-# LLM Ledger
+<h1><a href="https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac"><img src=".github/customize-button.svg" alt="Customize the app" height="40" align="right"></a>LLM Ledger</h1>
 
 A cost and usage governance dashboard for LLM spend. It answers the question observability and gateway tools leave open: who is spending what, across which teams, models, and providers — and is it under control.
 
@@ -8,7 +6,7 @@ A cost and usage governance dashboard for LLM spend. It answers the question obs
 
 Opens the dashboard on seeded demo data with no local setup. Customize it by chatting, and connect a provider admin key to see your real spend.
 
-<a href="https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac"><img src=".github/customize-button.svg" alt="Customize the app" height="52"></a>
+<a href="https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac"><img src=".github/customize-button-sm.svg" alt="Customize the app" height="40"></a>
 
 ## Overview
 
