@@ -1,72 +1,60 @@
-# LLM Ledger — Cost & Usage Governance Dashboard
+# LLM Ledger
 
-**See, allocate, and control your org's LLM spend across every team, model, and provider.** A finance-grade dashboard for the question observability tools can't answer: *who is spending what, and is it under control?*
+A cost and usage governance dashboard for LLM spend. It answers the question observability and gateway tools leave open: who is spending what, across which teams, models, and providers — and is it under control.
 
-![LLM Ledger dashboard](docs/preview.png)
+![LLM Ledger dashboard](https://assets.optidev.ai/app-thumbnails/llm-dashboard.png)
 
-Observability tools (Langfuse, Helicone) give you traces. Gateways (LiteLLM, Cloudflare AI Gateway) give you raw analytics. **LLM Ledger gives you the FinOps layer on top** — cost allocation, budget-vs-actual, forecasting, and chargeback — the views a CFO, a platform lead, and a team lead each actually need.
+[**Try it in OptiDev**](https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac) — opens the dashboard on seeded demo data with no local setup. Customize it by chatting, and connect a provider admin key to see your real spend.
 
-<!-- MAINTAINER: points at the PRODUCTION App Library entry
-     (host app.optidev.ai, app id 8f370f4f-7dac-4480-a1f6-d6cb7c5980ac). -->
-[![Try in OptiDev — no setup](https://img.shields.io/badge/%F0%9F%9A%80_Try_in_OptiDev-no_setup-f2b134?style=for-the-badge)](https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac)
+## Overview
 
-> **[🚀 Try it in OptiDev →](https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac)** — opens this exact dashboard in [OptiDev](https://app.optidev.ai), pre-built and running on demo data. Then make it yours by chatting — add Slack budget alerts, a board-report export, your own metrics — and connect your provider admin key for live spend. No local setup.
+Observability platforms (Langfuse, Helicone) surface traces; gateways (LiteLLM, Cloudflare AI Gateway) surface raw analytics. LLM Ledger sits above both as the FinOps layer — cost allocation, budgets, forecasting, and chargeback — the views a finance lead, a platform owner, and a team lead each need.
 
-## Highlights
+## Features
 
-- 📊 **Executive view** — total spend, forecast-to-month-end, budget-used %, cost allocation by team, budget-vs-actual per team, biggest week-over-week movers, unit economics.
-- 🧾 **Invoice reconciliation** — the finance-grade differentiator. Reconciles our list-price estimate against your **actual billed cost** (provider Cost API), surfaces the effective discount, and lets you enter your real invoice total for the last-mile check (taxes / minimums / credits). The number finance can defend against the bill.
-- 🏷️ **Real chargeback** — not a relabel. Showback shows each team's directly-attributed spend with the shared/platform pool left explicit; chargeback distributes that pool across budget-owned teams by **usage / equal / headcount**, so every dollar lands on a team and totals tie out. Exports a per-team chargeback statement.
-- 🎯 **Budget vs. actual** — forecast each team to month-end against its monthly budget, with on-track / at-risk / over status.
-- 💡 **Zero setup** — opens on realistic seeded data (12 teams · 6 models · 3 providers · 90 days). Nothing to configure to explore it.
-- 🎨 **Polished, dark-first cockpit UI** — built on React 19 + Tailwind + shadcn/ui + Recharts, with a colorblind-safe chart palette.
+- **Executive overview** — total spend, month-end forecast, budget utilization, spend by team, model, and provider, biggest week-over-week movers, and unit economics.
+- **Chargeback and showback** — showback attributes each team's direct spend and leaves the shared/platform pool explicit; chargeback distributes that pool across teams by usage, headcount, or an even split, so every dollar lands on a team and the totals reconcile. Exports a per-team statement.
+- **Invoice reconciliation** — compares the list-price estimate against actual billed cost from the provider Cost API, and accepts your real invoice total for a final check.
+- **Budgets** — forecasts each team to month-end against its budget, flagged on-track, at-risk, or over.
+- **Audit** — request log with filters and CSV export, budget alerts, and spend-spike anomaly detection.
 
-## Data modes
+## Data sources
 
-| Mode | What you do | What you see |
+| Mode | Setup | Shows |
 |---|---|---|
-| **① Demo** (default) | nothing | Full dashboard on seeded synthetic org data |
-| **② Connect key** *(roadmap)* | paste a provider **admin** key | your real spend via the provider Usage/Cost API |
-| **③ Gateway** *(roadmap)* | point at LiteLLM / Cloudflare AI Gateway | true per-team attribution from gateway metadata |
+| Demo | None (default) | Seeded synthetic organization — teams, models, and providers over 90 days |
+| Connect a key | Paste a provider admin key | Your real spend from the provider Usage and Cost APIs |
+| Gateway | Point at LiteLLM / Cloudflare AI Gateway | Per-request attribution (planned) |
 
-> Provider usage APIs need an **admin/org key** and can't be called safely from the browser, so Mode ② runs through a small edge-function proxy (holds the key as a secret). On OptiDev that's built in; self-hosted, it's a local function + `.env`.
+Provider Usage and Cost APIs require an organization admin key and cannot be called from the browser, so live mode runs through a small server-side function that holds the key as a secret. On OptiDev this is built in. Self-hosted, deploy the function in `supabase/functions/usage` and set `VITE_USAGE_PROXY_URL`.
 
-## Quick start
+## Getting started
 
 ```bash
 pnpm install
-pnpm dev        # http://localhost:5173
-pnpm build      # production build → dist/
+pnpm dev      # http://localhost:5173
+pnpm build    # production build to dist/
+```
+
+## Project structure
+
+```
+src/
+  data/seed.ts            Deterministic demo-data generator
+  lib/
+    types.ts              Domain model (gateway-friendly usage rows)
+    analytics.ts          Pure selectors; every view reads through these
+    datasource.tsx        Data context for demo and live modes
+    palette.ts            Chart color assignment (colorblind-safe)
+    format.ts             Currency, token, and percent formatting
+  components/             Stat tiles, charts, tables, and layout
+  views/                  Executive, Platform, Teams, Audit
+supabase/functions/usage  Server-side proxy for provider Usage and Cost APIs
 ```
 
 ## Tech stack
 
-React 19 · Vite 7 · TypeScript (strict) · Tailwind CSS 3 · shadcn/ui · Recharts · Framer Motion · React Router v7 · pnpm.
-
-```
-src/
-  data/seed.ts        deterministic synthetic-org generator (Mode ①)
-  lib/
-    types.ts          domain model (gateway-friendly UsageRow)
-    analytics.ts      pure selectors — all views read through these
-    datasource.tsx    data context (Mode ①; ②/③ implement the same contract)
-    palette.ts        chart color assignment (fixed-order, CVD-safe)
-    format.ts         money / token / percent formatters
-  components/dashboard/  stat tiles, charts, budget table
-  components/layout/     sidebar · topbar · shell
-  views/                 ExecutiveView (+ Platform / Team / Audit next)
-```
-
-## Roadmap
-
-- [x] Executive / Finance view
-- [x] Platform view — model mix, latency p50/p95, cache-hit, budget-headroom gauges, premium-model governance
-- [x] Team view — per-team detail, spend vs budget, model mix, trend
-- [x] Audit view — request log + filters + CSV export, budget alerts, spend-spike anomaly detection
-- [x] Mode ② — provider Usage/Cost API via edge function (`supabase/functions/usage`)
-- [x] Invoice reconciliation — list-price estimate vs. actual billed cost (Cost API) + invoice last-mile
-- [x] Real chargeback — shared-pool distribution (usage / equal / headcount) + per-team statement export
-- [ ] Mode ③ — LiteLLM / Cloudflare AI Gateway ingestion (unlocks latency, errors, true per-team & per-feature attribution)
+React 19, Vite 7, TypeScript (strict mode), Tailwind CSS, shadcn/ui, Recharts, and React Router 7. Package manager: pnpm.
 
 ## License
 
