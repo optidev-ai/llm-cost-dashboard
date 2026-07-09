@@ -6,13 +6,11 @@
 
 Observability tools (Langfuse, Helicone) give you traces. Gateways (LiteLLM, Cloudflare AI Gateway) give you raw analytics. **LLM Ledger gives you the FinOps layer on top** — cost allocation, budget-vs-actual, forecasting, and chargeback — the views a CFO, a platform lead, and a team lead each actually need.
 
-<!-- MAINTAINER: currently points at the SANDBOX1 App Library entry for testing
-     (host sandbox1.optiedge.cc, app id 75318d0d-4eb9-4d0c-bd57-37934c3d5513).
-     For the public launch, submit the app to PROD and swap both links to
-     https://app.optidev.ai/dashboard/apps?remix=<prod-app-id>. -->
-[![Try in OptiDev — no setup](https://img.shields.io/badge/%F0%9F%9A%80_Try_in_OptiDev-no_setup-f2b134?style=for-the-badge)](https://sandbox1.optiedge.cc/dashboard/apps?remix=75318d0d-4eb9-4d0c-bd57-37934c3d5513)
+<!-- MAINTAINER: points at the PRODUCTION App Library entry
+     (host app.optidev.ai, app id 8f370f4f-7dac-4480-a1f6-d6cb7c5980ac). -->
+[![Try in OptiDev — no setup](https://img.shields.io/badge/%F0%9F%9A%80_Try_in_OptiDev-no_setup-f2b134?style=for-the-badge)](https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac)
 
-> **[🚀 Try it in OptiDev →](https://sandbox1.optiedge.cc/dashboard/apps?remix=75318d0d-4eb9-4d0c-bd57-37934c3d5513)** — opens this exact dashboard in [OptiDev](https://sandbox1.optiedge.cc), pre-built and running on demo data. Then make it yours by chatting — add Slack budget alerts, a board-report export, your own metrics — and connect your provider admin key for live spend. No local setup.
+> **[🚀 Try it in OptiDev →](https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac)** — opens this exact dashboard in [OptiDev](https://app.optidev.ai), pre-built and running on demo data. Then make it yours by chatting — add Slack budget alerts, a board-report export, your own metrics — and connect your provider admin key for live spend. No local setup.
 
 ## Highlights
 
