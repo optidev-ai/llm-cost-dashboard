@@ -4,9 +4,9 @@ A cost and usage governance dashboard for LLM spend. It answers the question obs
 
 ![LLM Ledger dashboard](https://assets.optidev.ai/app-thumbnails/llm-dashboard.png)
 
-[![Try it in OptiDev](https://img.shields.io/badge/Try_it_in_OptiDev-2563eb?style=for-the-badge)](https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac)
 
 Opens the dashboard on seeded demo data with no local setup. Customize it by chatting, and connect a provider admin key to see your real spend.
+[![Try it in OptiDev](https://img.shields.io/badge/Try_it_in_OptiDev-2563eb?style=for-the-badge)](https://app.optidev.ai/dashboard/apps?remix=8f370f4f-7dac-4480-a1f6-d6cb7c5980ac)
 
 ## Overview
 
