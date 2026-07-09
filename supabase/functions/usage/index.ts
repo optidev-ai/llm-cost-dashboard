@@ -572,16 +572,27 @@ Deno.serve(async (req: Request) => {
     // Each provider is isolated: if one fails (after retries), it returns empty so
     // the others still render — one provider's outage never blanks the whole view.
     const failed: Provider[] = [];
-    const pull = async (effectiveDays: number) =>
+    const pull = async () =>
       Promise.all(
         creds.map(async (c) => {
           try {
             const fetcher = c.provider === "anthropic" ? fetchAnthropic : fetchOpenAI;
             const names = await fetchNames(c.provider, c.adminKey);
-            const [rows, billed] = await Promise.all([
-              fetcher(c.adminKey, effectiveDays, names),
-              fetchBilled(c.provider, c.adminKey, effectiveDays),
+            let [rows, billed] = await Promise.all([
+              fetcher(c.adminKey, days, names),
+              fetchBilled(c.provider, c.adminKey, days),
             ]);
+            // Per-provider widen: THIS provider has no activity in the requested
+            // window but may have older spend. Widen it alone to ~13 months so a
+            // provider whose only usage predates the window still appears — a
+            // busier provider's recent data no longer suppresses it (the old
+            // all-or-nothing widen dropped such providers entirely).
+            if (rows.length === 0 && days < 400) {
+              [rows, billed] = await Promise.all([
+                fetcher(c.adminKey, 400, names),
+                fetchBilled(c.provider, c.adminKey, 400),
+              ]);
+            }
             return { provider: c.provider, rows, billed };
           } catch {
             if (!failed.includes(c.provider)) failed.push(c.provider);
@@ -590,14 +601,8 @@ Deno.serve(async (req: Request) => {
         }),
       );
 
-    let effectiveDays = days;
-    let parts = await pull(effectiveDays);
-    // Sparse orgs can have no recent activity but real spend further back — widen
-    // once to ~13 months before giving up (cheap now that fetches are chunked).
-    if (parts.every((p) => p.rows.length === 0) && effectiveDays < 400) {
-      effectiveDays = 400;
-      parts = await pull(effectiveDays);
-    }
+    const parts = await pull();
+    const effectiveDays = days;
     const allRows = parts.flatMap((p) => p.rows);
     if (allRows.length === 0) {
       return json({ error: "No usage found for the connected org(s) in the last 13 months. The key(s) are valid, but there's no recorded activity in that window — check the provider's own usage dashboard." }, 404);
